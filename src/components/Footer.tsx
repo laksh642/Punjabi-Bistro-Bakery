@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { MapPin, Phone, MessageCircle, Clock, ShieldCheck, Heart } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import { useStore } from '../context/StoreContext';
 import { PolicyModal } from './PolicyModal';
 import { PunjabiBistroLogo } from './PunjabiBistroLogo';
@@ -11,8 +10,6 @@ export const Footer: React.FC = () => {
     setIsTrackingOpen,
     setIsCakeStudioOpen,
     setIsIssueModalOpen,
-    setIsAdminView,
-    isAdminView,
   } = useStore();
 
   const [activePolicy, setActivePolicy] = useState<'delivery' | 'refund' | 'eggless' | 'privacy' | null>(null);
@@ -171,20 +168,20 @@ export const Footer: React.FC = () => {
               </ul>
             </div>
 
-            {/* Col 4: Operations & Portal */}
+            {/* Col 4: Fresh Bakery Promise */}
             <div className="lg:col-span-2 space-y-3">
               <h4 className="font-serif text-sm font-bold text-white uppercase tracking-wider">
-                Bakery Ops
+                Fresh Promise
               </h4>
-              <p className="text-xs text-emerald-200/70">
-                Owner dashboard for live kitchen Kanban, custom cake enquiries & menu pricing.
+              <p className="text-xs text-emerald-200/80 leading-relaxed">
+                Handcrafted daily in Dharamkot using premium dairy cream, fresh fruits, and 100% pure vegetarian ingredients.
               </p>
-              <Link
-                to="/admin"
-                className="w-full inline-flex items-center justify-center gap-1.5 bg-emerald-900/90 hover:bg-emerald-800 text-amber-300 border border-emerald-700/60 font-semibold text-xs py-2.5 px-3 rounded-xl transition-colors cursor-pointer text-center"
-              >
-                <span>⚙️ Owner Operations Portal</span>
-              </Link>
+              <div className="pt-1">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-900/60 border border-emerald-700/50 text-[11px] text-amber-300 font-semibold">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>100% Pure Eggless</span>
+                </span>
+              </div>
             </div>
 
           </div>

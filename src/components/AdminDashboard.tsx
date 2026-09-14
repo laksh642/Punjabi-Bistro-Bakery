@@ -35,6 +35,7 @@ import { useStore } from '../context/StoreContext';
 import { Order, OrderStatus, Product, CustomCakeEnquiry, DeliveryZone } from '../types';
 import { PunjabiBistroLogo } from './PunjabiBistroLogo';
 import { SUPABASE_SETUP_SQL, SUPABASE_URL } from '../lib/supabase';
+import { ProductImageManager } from './ProductImageManager';
 
 export const AdminDashboard: React.FC = () => {
   const {
@@ -94,6 +95,51 @@ export const AdminDashboard: React.FC = () => {
   );
   const [newProdEggless, setNewProdEggless] = useState(true);
   const [newProdBestseller, setNewProdBestseller] = useState(false);
+
+  // Edit Existing Product & Image Modal State
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [editProdName, setEditProdName] = useState('');
+  const [editProdPrice, setEditProdPrice] = useState(0);
+  const [editProdCat, setEditProdCat] = useState('');
+  const [editProdDesc, setEditProdDesc] = useState('');
+  const [editProdImage, setEditProdImage] = useState('');
+  const [editProdEggless, setEditProdEggless] = useState(true);
+  const [editProdBestseller, setEditProdBestseller] = useState(false);
+  const [editProdAvailable, setEditProdAvailable] = useState(true);
+
+  const startEditProduct = (p: Product) => {
+    setEditingProduct(p);
+    setEditProdName(p.name);
+    setEditProdPrice(p.price);
+    setEditProdCat(p.categoryId);
+    setEditProdDesc(p.description || '');
+    setEditProdImage(p.image);
+    setEditProdEggless(p.isEggless ?? true);
+    setEditProdBestseller(p.isBestseller ?? false);
+    setEditProdAvailable(p.isAvailable);
+  };
+
+  const handleUpdateProductSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProduct || !editProdName.trim()) return;
+
+    const catObj = categories.find((c) => c.id === editProdCat);
+    const updated: Product = {
+      ...editingProduct,
+      name: editProdName.trim(),
+      description: editProdDesc.trim(),
+      price: Number(editProdPrice),
+      categoryId: editProdCat,
+      categoryName: catObj ? catObj.name : editingProduct.categoryName,
+      image: editProdImage.trim() || editingProduct.image,
+      isAvailable: editProdAvailable,
+      isEggless: editProdEggless,
+      isBestseller: editProdBestseller,
+    };
+
+    updateProduct(updated);
+    setEditingProduct(null);
+  };
 
   // Cake Quotation State
   const [quoteEnquiry, setQuoteEnquiry] = useState<CustomCakeEnquiry | null>(null);
@@ -537,17 +583,35 @@ export const AdminDashboard: React.FC = () => {
                     {products.map((p) => (
                       <tr key={p.id} className="hover:bg-emerald-50/40 transition-colors">
                         <td className="p-3.5 flex items-center gap-3">
-                          <img
-                            src={p.image}
-                            alt={p.name}
-                            className="w-11 h-11 rounded-lg object-cover border border-emerald-100"
-                          />
+                          <button
+                            type="button"
+                            onClick={() => startEditProduct(p)}
+                            className="relative group rounded-lg overflow-hidden shrink-0 border border-emerald-100 cursor-pointer"
+                            title="Click to edit item and image"
+                          >
+                            <img
+                              src={p.image}
+                              alt={p.name}
+                              className="w-11 h-11 object-cover group-hover:scale-105 transition-transform"
+                            />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity">
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </div>
+                          </button>
                           <div>
-                            <div className="font-bold text-emerald-950 text-sm">{p.name}</div>
+                            <button
+                              type="button"
+                              onClick={() => startEditProduct(p)}
+                              className="font-bold text-emerald-950 text-sm hover:text-emerald-700 text-left transition-colors cursor-pointer"
+                            >
+                              {p.name}
+                            </button>
                             {p.isBestseller && (
-                              <span className="text-[10px] text-emerald-800 font-bold uppercase">
-                                ★ Bestseller
-                              </span>
+                              <div>
+                                <span className="text-[10px] text-emerald-800 font-bold uppercase">
+                                  ★ Bestseller
+                                </span>
+                              </div>
                             )}
                           </div>
                         </td>
@@ -589,13 +653,27 @@ export const AdminDashboard: React.FC = () => {
                           </button>
                         </td>
                         <td className="p-3.5 text-right">
-                          <button
-                            onClick={() => deleteProduct(p.id)}
-                            className="text-stone-400 hover:text-rose-600 p-1.5"
-                            title="Delete item"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => startEditProduct(p)}
+                              className="text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100/80 px-2.5 py-1.5 rounded-lg font-semibold text-xs flex items-center gap-1 transition-colors cursor-pointer border border-emerald-200/60"
+                              title="Edit item details & change image"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                              <span>Edit</span>
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (confirm(`Are you sure you want to delete "${p.name}"?`)) {
+                                  deleteProduct(p.id);
+                                }
+                              }}
+                              className="text-stone-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
+                              title="Delete item"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1271,6 +1349,32 @@ export const AdminDashboard: React.FC = () => {
                   <div className="text-2xl font-bold font-serif text-emerald-950">{issues.length}</div>
                   <div className="text-[11px] text-emerald-850/70">Escalated support tickets</div>
                 </div>
+
+                <div className="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-bold text-emerald-950">public.products</span>
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        supabaseStatus?.tablesStatus.products ? 'bg-emerald-500' : 'bg-amber-400'
+                      }`}
+                    />
+                  </div>
+                  <div className="text-2xl font-bold font-serif text-emerald-950">{products.length}</div>
+                  <div className="text-[11px] text-emerald-850/70">Live menu items & pricing</div>
+                </div>
+
+                <div className="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-bold text-emerald-950">Storage: product-images</span>
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        supabaseStatus?.storageStatus?.productImagesBucket ? 'bg-emerald-500' : 'bg-amber-400'
+                      }`}
+                    />
+                  </div>
+                  <div className="text-2xl font-bold font-serif text-emerald-950">Active</div>
+                  <div className="text-[11px] text-emerald-850/70">Supabase Storage CDN bucket</div>
+                </div>
               </div>
             </div>
 
@@ -1651,17 +1755,11 @@ export const AdminDashboard: React.FC = () => {
                 />
               </div>
 
-              <div>
-                <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
-                  Image URL
-                </label>
-                <input
-                  type="url"
-                  value={newProdImage}
-                  onChange={(e) => setNewProdImage(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-emerald-200 bg-white focus:outline-none focus:border-emerald-600 text-emerald-950"
-                />
-              </div>
+              <ProductImageManager
+                currentImageUrl={newProdImage}
+                onImageChange={(url) => setNewProdImage(url)}
+                productName={newProdName || 'New Menu Item'}
+              />
 
               <div className="flex gap-4">
                 <label className="flex items-center gap-2 font-medium cursor-pointer">
@@ -1696,6 +1794,151 @@ export const AdminDashboard: React.FC = () => {
                   className="flex-1 bg-emerald-700 text-white font-bold py-2.5 rounded-xl hover:bg-emerald-800 transition-colors shadow-xs cursor-pointer"
                 >
                   Save Item to Menu
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT EXISTING PRODUCT & IMAGE MODAL */}
+      {editingProduct && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
+          onClick={() => setEditingProduct(null)}
+        >
+          <div
+            className="bg-white rounded-3xl max-w-xl w-full border border-emerald-200 p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-emerald-100 pb-3">
+              <div>
+                <h3 className="font-serif font-bold text-lg text-emerald-950">
+                  Edit Menu Item & Image
+                </h3>
+                <p className="text-xs text-stone-500">
+                  Update product details, live availability, or replace the photo using Supabase Storage.
+                </p>
+              </div>
+              <button
+                onClick={() => setEditingProduct(null)}
+                className="p-1 rounded-full hover:bg-stone-100 text-stone-500 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateProductSubmit} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                  Item Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editProdName}
+                  onChange={(e) => setEditProdName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-emerald-200 bg-white focus:outline-none focus:border-emerald-600 text-emerald-950 font-medium"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                    Price (₹) *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    value={editProdPrice}
+                    onChange={(e) => setEditProdPrice(Number(e.target.value))}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-emerald-200 bg-white focus:outline-none focus:border-emerald-600 text-emerald-950 font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                    Category
+                  </label>
+                  <select
+                    value={editProdCat}
+                    onChange={(e) => setEditProdCat(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-emerald-200 bg-white focus:outline-none focus:border-emerald-600 text-emerald-950"
+                  >
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                  Description
+                </label>
+                <textarea
+                  rows={2}
+                  value={editProdDesc}
+                  onChange={(e) => setEditProdDesc(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-xl border border-emerald-200 bg-white focus:outline-none focus:border-emerald-600 text-emerald-950"
+                />
+              </div>
+
+              {/* DEDICATED PRODUCT IMAGE MANAGEMENT SECTION */}
+              <ProductImageManager
+                currentImageUrl={editProdImage}
+                onImageChange={(url) => setEditProdImage(url)}
+                productName={editProdName}
+              />
+
+              <div className="flex flex-wrap gap-4 pt-1">
+                <label className="flex items-center gap-2 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editProdEggless}
+                    onChange={(e) => setEditProdEggless(e.target.checked)}
+                    className="w-4 h-4 text-emerald-700 rounded border-stone-300 focus:ring-emerald-600"
+                  />
+                  <span>100% Eggless</span>
+                </label>
+
+                <label className="flex items-center gap-2 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editProdBestseller}
+                    onChange={(e) => setEditProdBestseller(e.target.checked)}
+                    className="w-4 h-4 text-emerald-700 rounded border-stone-300 focus:ring-emerald-600"
+                  />
+                  <span>Mark as Bestseller</span>
+                </label>
+
+                <label className="flex items-center gap-2 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editProdAvailable}
+                    onChange={(e) => setEditProdAvailable(e.target.checked)}
+                    className="w-4 h-4 text-emerald-700 rounded border-stone-300 focus:ring-emerald-600"
+                  />
+                  <span>In Stock (Available for ordering)</span>
+                </label>
+              </div>
+
+              <div className="pt-3 flex gap-2 border-t border-emerald-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingProduct(null)}
+                  className="px-4 py-2.5 rounded-xl border border-stone-200 font-semibold text-stone-600 hover:bg-stone-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 bg-emerald-800 text-white font-bold py-2.5 rounded-xl hover:bg-emerald-900 transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Save Changes & Sync to Menu</span>
                 </button>
               </div>
             </form>

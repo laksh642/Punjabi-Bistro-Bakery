@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Order, CustomCakeEnquiry, ReviewItem, CustomerIssue, OrderStatus } from '../types';
+import { Order, CustomCakeEnquiry, ReviewItem, CustomerIssue, OrderStatus, Product } from '../types';
 
 // Supabase project credentials (provided by user)
 export const SUPABASE_URL =
@@ -32,11 +32,13 @@ export interface ConnectionStatus {
     cake_enquiries: boolean;
     reviews: boolean;
     issues: boolean;
+    products: boolean;
+    storage: boolean;
   };
 }
 
 /**
- * Health check to test Supabase connection and verify which tables exist
+ * Health check to test Supabase connection and verify which tables and storage exist
  */
 export async function testSupabaseConnection(): Promise<ConnectionStatus> {
   const result: ConnectionStatus = {
@@ -47,6 +49,8 @@ export async function testSupabaseConnection(): Promise<ConnectionStatus> {
       cake_enquiries: false,
       reviews: false,
       issues: false,
+      products: false,
+      storage: false,
     },
   };
 
@@ -56,24 +60,43 @@ export async function testSupabaseConnection(): Promise<ConnectionStatus> {
   }
 
   try {
-    const [ordersRes, cakesRes, reviewsRes, issuesRes] = await Promise.all([
+    const [ordersRes, cakesRes, reviewsRes, issuesRes, productsRes] = await Promise.all([
       supabase.from('orders').select('id').limit(1),
       supabase.from('custom_cake_enquiries').select('id').limit(1),
       supabase.from('reviews').select('id').limit(1),
       supabase.from('customer_issues').select('id').limit(1),
+      supabase.from('products').select('id').limit(1),
     ]);
 
     result.tablesStatus.orders = !ordersRes.error;
     result.tablesStatus.cake_enquiries = !cakesRes.error;
     result.tablesStatus.reviews = !reviewsRes.error;
     result.tablesStatus.issues = !issuesRes.error;
+    result.tablesStatus.products = !productsRes.error;
+
+    // Check storage bucket
+    try {
+      const { data: buckets } = await supabase.storage.listBuckets();
+      result.tablesStatus.storage = Boolean(
+        buckets?.some((b) => b.name === 'product-images' || b.name === 'products')
+      );
+    } catch {
+      result.tablesStatus.storage = false;
+    }
 
     result.connected = true;
-    const activeCount = Object.values(result.tablesStatus).filter(Boolean).length;
-    if (activeCount === 4) {
-      result.message = 'All 4 tables synced and operational in Supabase cloud.';
+    const activeCount = [
+      result.tablesStatus.orders,
+      result.tablesStatus.cake_enquiries,
+      result.tablesStatus.reviews,
+      result.tablesStatus.issues,
+      result.tablesStatus.products,
+    ].filter(Boolean).length;
+
+    if (activeCount === 5) {
+      result.message = 'All database tables synced and operational in Supabase cloud.';
     } else if (activeCount > 0) {
-      result.message = `Connected (${activeCount}/4 tables ready). Click 'Setup Schema' if needed.`;
+      result.message = `Connected (${activeCount}/5 tables ready). Click 'Setup Schema' if needed.`;
     } else {
       result.message = 'Supabase reachable! Ready for initial database table creation.';
     }
@@ -409,9 +432,230 @@ export async function resolveCustomerIssueInCloud(id: string, notes: string): Pr
   }
 }
 
+/**
+ * Upload a product image file to Supabase Storage ('product-images' bucket).
+ * Validates image mime type (JPEG, PNG, WEBP) and file size (up to 10MB).
+ * Returns the public URL on success or an error message on failure.
+ */
+export async function uploadProductImageToSupabase(file: File): Promise<{
+  url: string | null;
+  path: string | null;
+  error: string | null;
+}> {
+  if (!isSupabaseConfigured) {
+    return {
+      url: null,
+      path: null,
+      error: 'Supabase credentials are not configured.',
+    };
+  }
+
+  // Validate format
+  const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+  if (!validTypes.includes(file.type.toLowerCase())) {
+    return {
+      url: null,
+      path: null,
+      error: 'Unsupported image format. Please upload JPG, PNG, or WEBP.',
+    };
+  }
+
+  // Validate size (max 10MB)
+  const maxSize = 10 * 1024 * 1024;
+  if (file.size > maxSize) {
+    return {
+      url: null,
+      path: null,
+      error: `File is too large (${(file.size / (1024 * 1024)).toFixed(1)}MB). Maximum allowed size is 10MB.`,
+    };
+  }
+
+  const cleanName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+  const filePath = `products/${Date.now()}_${Math.random().toString(36).substring(2, 8)}_${cleanName}`;
+  const primaryBucket = 'product-images';
+  const fallbackBucket = 'products';
+
+  try {
+    let chosenBucket = primaryBucket;
+    let { data: uploadData, error: uploadError } = await supabase.storage
+      .from(primaryBucket)
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: true,
+        contentType: file.type,
+      });
+
+    if (uploadError) {
+      // If primary bucket not found, try fallback bucket
+      if (
+        uploadError.message.toLowerCase().includes('not found') ||
+        uploadError.message.toLowerCase().includes('bucket')
+      ) {
+        const fallbackRes = await supabase.storage.from(fallbackBucket).upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true,
+          contentType: file.type,
+        });
+
+        if (!fallbackRes.error) {
+          chosenBucket = fallbackBucket;
+          uploadError = null;
+        }
+      }
+    }
+
+    if (uploadError) {
+      return {
+        url: null,
+        path: null,
+        error: uploadError.message || 'Failed to upload image to Supabase Storage.',
+      };
+    }
+
+    const { data: publicUrlData } = supabase.storage.from(chosenBucket).getPublicUrl(filePath);
+
+    if (!publicUrlData?.publicUrl) {
+      return {
+        url: null,
+        path: null,
+        error: 'Failed to retrieve public image URL from Supabase Storage.',
+      };
+    }
+
+    return {
+      url: publicUrlData.publicUrl,
+      path: filePath,
+      error: null,
+    };
+  } catch (err: unknown) {
+    return {
+      url: null,
+      path: null,
+      error: err instanceof Error ? err.message : 'Unknown storage upload error',
+    };
+  }
+}
+
+/**
+ * Remove an image from Supabase Storage if it was uploaded there.
+ */
+export async function deleteProductImageFromSupabase(imageReference: string): Promise<boolean> {
+  if (!isSupabaseConfigured || !imageReference) return false;
+  try {
+    if (imageReference.includes('/storage/v1/object/public/')) {
+      const parts = imageReference.split('/storage/v1/object/public/');
+      if (parts[1]) {
+        const [bucket, ...pathParts] = parts[1].split('/');
+        const filePath = pathParts.join('/');
+        if (bucket && filePath) {
+          const { error } = await supabase.storage.from(bucket).remove([filePath]);
+          return !error;
+        }
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Fetch all products from Supabase cloud database.
+ */
+export async function fetchProductsFromCloud(): Promise<Product[] | null> {
+  if (!isSupabaseConfigured) return null;
+  try {
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.warn('Supabase fetchProducts notice:', error.message);
+      return null;
+    }
+    if (!data || data.length === 0) return [];
+
+    return data.map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      categoryId: row.category_id,
+      categoryName: row.category_name,
+      description: row.description || '',
+      price: Number(row.price) || 0,
+      originalPrice: row.original_price ? Number(row.original_price) : undefined,
+      image: row.image || '',
+      isAvailable: row.is_available !== undefined ? Boolean(row.is_available) : true,
+      isBestseller: Boolean(row.is_bestseller),
+      isEggless: row.is_eggless !== undefined ? Boolean(row.is_eggless) : true,
+      isVegetarian: row.is_vegetarian !== undefined ? Boolean(row.is_vegetarian) : true,
+      isSpicy: Boolean(row.is_spicy),
+      prepTimeMinutes: row.prep_time_minutes ? Number(row.prep_time_minutes) : 20,
+      customizationGroups: Array.isArray(row.customization_groups) ? row.customization_groups : undefined,
+    }));
+  } catch (err) {
+    console.warn('Supabase fetchProducts error:', err);
+    return null;
+  }
+}
+
+/**
+ * Save or update a product in Supabase cloud database.
+ */
+export async function saveProductToCloud(product: Product): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    const payload = {
+      id: product.id,
+      name: product.name,
+      category_id: product.categoryId,
+      category_name: product.categoryName,
+      description: product.description || '',
+      price: product.price,
+      original_price: product.originalPrice || null,
+      image: product.image,
+      is_available: product.isAvailable,
+      is_bestseller: product.isBestseller || false,
+      is_eggless: product.isEggless ?? true,
+      is_vegetarian: product.isVegetarian ?? true,
+      is_spicy: product.isSpicy || false,
+      prep_time_minutes: product.prepTimeMinutes || 20,
+      customization_groups: product.customizationGroups || [],
+    };
+
+    const { error } = await supabase.from('products').upsert(payload, { onConflict: 'id' });
+    if (error) {
+      console.warn('Supabase saveProduct error:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Supabase saveProduct error:', err);
+    return false;
+  }
+}
+
+/**
+ * Delete a product from Supabase cloud database.
+ */
+export async function deleteProductFromCloud(productId: string): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    const { error } = await supabase.from('products').delete().eq('id', productId);
+    if (error) {
+      console.warn('Supabase deleteProduct error:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Supabase deleteProduct error:', err);
+    return false;
+  }
+}
+
 export const SUPABASE_SETUP_SQL = `-- ==========================================================
 -- Punjabi Bistro & Bakery, Dharamkot
--- Supabase Database Schema & Tables
+-- Supabase Database Schema & Storage Configuration
 -- ==========================================================
 
 -- 1. Orders Table
@@ -498,45 +742,86 @@ CREATE TABLE IF NOT EXISTS public.customer_issues (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 5. Products Table (Menu Items & Live Pricing)
+CREATE TABLE IF NOT EXISTS public.products (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  category_id TEXT NOT NULL,
+  category_name TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  price NUMERIC NOT NULL,
+  original_price NUMERIC,
+  image TEXT NOT NULL,
+  is_available BOOLEAN DEFAULT TRUE,
+  is_bestseller BOOLEAN DEFAULT FALSE,
+  is_eggless BOOLEAN DEFAULT TRUE,
+  is_vegetarian BOOLEAN DEFAULT TRUE,
+  is_spicy BOOLEAN DEFAULT FALSE,
+  prep_time_minutes INTEGER DEFAULT 20,
+  customization_groups JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Enable Row Level Security (RLS)
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.custom_cake_enquiries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customer_issues ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 
 -- Allow public read & write access for the Bistro store application
 DROP POLICY IF EXISTS "Allow public select on orders" ON public.orders;
 CREATE POLICY "Allow public select on orders" ON public.orders FOR SELECT USING (true);
-
 DROP POLICY IF EXISTS "Allow public insert on orders" ON public.orders;
 CREATE POLICY "Allow public insert on orders" ON public.orders FOR INSERT WITH CHECK (true);
-
 DROP POLICY IF EXISTS "Allow public update on orders" ON public.orders;
 CREATE POLICY "Allow public update on orders" ON public.orders FOR UPDATE USING (true);
 
 DROP POLICY IF EXISTS "Allow public select on custom_cake_enquiries" ON public.custom_cake_enquiries;
 CREATE POLICY "Allow public select on custom_cake_enquiries" ON public.custom_cake_enquiries FOR SELECT USING (true);
-
 DROP POLICY IF EXISTS "Allow public insert on custom_cake_enquiries" ON public.custom_cake_enquiries;
 CREATE POLICY "Allow public insert on custom_cake_enquiries" ON public.custom_cake_enquiries FOR INSERT WITH CHECK (true);
-
 DROP POLICY IF EXISTS "Allow public update on custom_cake_enquiries" ON public.custom_cake_enquiries;
 CREATE POLICY "Allow public update on custom_cake_enquiries" ON public.custom_cake_enquiries FOR UPDATE USING (true);
 
 DROP POLICY IF EXISTS "Allow public select on reviews" ON public.reviews;
 CREATE POLICY "Allow public select on reviews" ON public.reviews FOR SELECT USING (true);
-
 DROP POLICY IF EXISTS "Allow public insert on reviews" ON public.reviews;
 CREATE POLICY "Allow public insert on reviews" ON public.reviews FOR INSERT WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Allow public select on customer_issues" ON public.customer_issues;
 CREATE POLICY "Allow public select on customer_issues" ON public.customer_issues FOR SELECT USING (true);
-
 DROP POLICY IF EXISTS "Allow public insert on customer_issues" ON public.customer_issues;
 CREATE POLICY "Allow public insert on customer_issues" ON public.customer_issues FOR INSERT WITH CHECK (true);
-
 DROP POLICY IF EXISTS "Allow public update on customer_issues" ON public.customer_issues;
 CREATE POLICY "Allow public update on customer_issues" ON public.customer_issues FOR UPDATE USING (true);
+
+DROP POLICY IF EXISTS "Allow public select on products" ON public.products;
+CREATE POLICY "Allow public select on products" ON public.products FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow public insert on products" ON public.products;
+CREATE POLICY "Allow public insert on products" ON public.products FOR INSERT WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow public update on products" ON public.products;
+CREATE POLICY "Allow public update on products" ON public.products FOR UPDATE USING (true);
+DROP POLICY IF EXISTS "Allow public delete on products" ON public.products;
+CREATE POLICY "Allow public delete on products" ON public.products FOR DELETE USING (true);
+
+-- 6. Supabase Storage: Product Images Bucket Setup
+INSERT INTO storage.buckets (id, name, public) 
+VALUES ('product-images', 'product-images', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+-- Storage Policies for Public Reading and Admin Uploading
+DROP POLICY IF EXISTS "Public Access product-images" ON storage.objects;
+CREATE POLICY "Public Access product-images" ON storage.objects FOR SELECT USING (bucket_id = 'product-images');
+
+DROP POLICY IF EXISTS "Public Upload product-images" ON storage.objects;
+CREATE POLICY "Public Upload product-images" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'product-images');
+
+DROP POLICY IF EXISTS "Public Update product-images" ON storage.objects;
+CREATE POLICY "Public Update product-images" ON storage.objects FOR UPDATE USING (bucket_id = 'product-images');
+
+DROP POLICY IF EXISTS "Public Delete product-images" ON storage.objects;
+CREATE POLICY "Public Delete product-images" ON storage.objects FOR DELETE USING (bucket_id = 'product-images');
 
 -- Enable Realtime publication for live order and cake updates
 ALTER PUBLICATION supabase_realtime ADD TABLE public.orders;

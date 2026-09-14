@@ -34,6 +34,9 @@ import {
   saveReviewToCloud,
   saveCustomerIssueToCloud,
   resolveCustomerIssueInCloud,
+  fetchProductsFromCloud,
+  saveProductToCloud,
+  deleteProductFromCloud,
   ConnectionStatus,
   supabase,
   isSupabaseConfigured,
@@ -266,6 +269,19 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             });
           }
         }
+
+        // 4. Sync products from Supabase cloud
+        if (status.tablesStatus.products) {
+          const cloudProducts = await fetchProductsFromCloud();
+          if (cloudProducts && cloudProducts.length > 0) {
+            setProducts((prev) => {
+              const map = new Map<string, Product>();
+              prev.forEach((p) => map.set(p.id, p));
+              cloudProducts.forEach((p) => map.set(p.id, p));
+              return Array.from(map.values());
+            });
+          }
+        }
       }
     } catch (err) {
       console.warn('Sync with cloud error:', err);
@@ -398,6 +414,44 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   : e
               )
             );
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'products' },
+        (payload) => {
+          if ((payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') && payload.new) {
+            const row = payload.new as any;
+            const updatedProd: Product = {
+              id: row.id,
+              name: row.name,
+              categoryId: row.category_id,
+              categoryName: row.category_name,
+              description: row.description || '',
+              price: Number(row.price) || 0,
+              originalPrice: row.original_price ? Number(row.original_price) : undefined,
+              image: row.image || '',
+              isAvailable: row.is_available !== undefined ? Boolean(row.is_available) : true,
+              isBestseller: Boolean(row.is_bestseller),
+              isEggless: row.is_eggless !== undefined ? Boolean(row.is_eggless) : true,
+              isVegetarian: row.is_vegetarian !== undefined ? Boolean(row.is_vegetarian) : true,
+              isSpicy: Boolean(row.is_spicy),
+              prepTimeMinutes: row.prep_time_minutes ? Number(row.prep_time_minutes) : 20,
+              customizationGroups: Array.isArray(row.customization_groups) ? row.customization_groups : undefined,
+            };
+            setProducts((prev) => {
+              const idx = prev.findIndex((p) => p.id === updatedProd.id);
+              if (idx > -1) {
+                const next = [...prev];
+                next[idx] = updatedProd;
+                return next;
+              }
+              return [updatedProd, ...prev];
+            });
+          } else if (payload.eventType === 'DELETE' && payload.old) {
+            const oldId = (payload.old as any).id;
+            setProducts((prev) => prev.filter((p) => p.id !== oldId));
           }
         }
       )
@@ -575,11 +629,23 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Product Admin Operations
   const updateProduct = (product: Product) => {
     setProducts((prev) => prev.map((p) => (p.id === product.id ? product : p)));
+    saveProductToCloud(product).catch((err) => {
+      console.warn('Supabase updateProduct sync warning:', err);
+    });
   };
 
   const toggleProductAvailability = (productId: string) => {
     setProducts((prev) =>
-      prev.map((p) => (p.id === productId ? { ...p, isAvailable: !p.isAvailable } : p))
+      prev.map((p) => {
+        if (p.id === productId) {
+          const updated = { ...p, isAvailable: !p.isAvailable };
+          saveProductToCloud(updated).catch((err) => {
+            console.warn('Supabase toggleAvailability sync warning:', err);
+          });
+          return updated;
+        }
+        return p;
+      })
     );
   };
 
@@ -589,10 +655,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       id: `prod-${Date.now()}`,
     };
     setProducts((prev) => [newProduct, ...prev]);
+    saveProductToCloud(newProduct).catch((err) => {
+      console.warn('Supabase addProduct sync warning:', err);
+    });
   };
 
   const deleteProduct = (productId: string) => {
     setProducts((prev) => prev.filter((p) => p.id !== productId));
+    deleteProductFromCloud(productId).catch((err) => {
+      console.warn('Supabase deleteProduct sync warning:', err);
+    });
   };
 
   // Delivery & Settings Admin

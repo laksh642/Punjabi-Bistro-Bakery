@@ -14,7 +14,6 @@ import {
   Cake,
   QrCode,
   FileText,
-  Lock,
 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { PunjabiBistroLogo } from './PunjabiBistroLogo';
@@ -30,8 +29,6 @@ export const Navbar: React.FC = () => {
     setIsMenuOnlyMode,
     isStoreOpen,
     businessSettings,
-    isAdminView,
-    setIsAdminView,
   } = useStore();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -88,17 +85,6 @@ export const Navbar: React.FC = () => {
                 <MessageCircle className="w-3 h-3 text-emerald-300" />
                 <span>WhatsApp</span>
               </a>
-
-              {/* Admin Portal Page Link */}
-              <Link
-                id="toggle-admin-portal-top"
-                to="/admin"
-                className="text-[11px] px-2.5 py-0.5 rounded-full font-medium transition-all bg-emerald-900/80 text-emerald-200 hover:bg-emerald-800 hover:text-white flex items-center gap-1"
-                title="Open Dedicated Admin & Kitchen Portal"
-              >
-                <Lock className="w-3 h-3 text-amber-300" />
-                <span>Admin Portal</span>
-              </Link>
             </div>
           </div>
         </div>
@@ -296,14 +282,6 @@ export const Navbar: React.FC = () => {
               >
                 <Clock className="w-4 h-4 text-emerald-700" />
                 <span>Track Active Order</span>
-              </Link>
-              <Link
-                to="/admin"
-                onClick={() => setMobileMenuOpen(false)}
-                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-950 text-emerald-200 text-sm font-semibold hover:bg-emerald-900 transition-colors"
-              >
-                <Lock className="w-4 h-4 text-amber-300" />
-                <span>Staff & Admin Portal</span>
               </Link>
               <button
                 onClick={() => {
