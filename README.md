@@ -12,12 +12,46 @@
 - **🍕 Bistro Café Menu**: Thin-crust pizzas, creamy white & red sauce pastas, burgers, wraps, sandwiches, fries, and shakes.
 - **🚚 Zone-Based Delivery**: Fixed-rate instant delivery for Dharamkot Town, Kot Ise Khan Road, Jalalabad Road, and surrounding villages.
 - **📱 Separate Storefront & Admin Portal**:
-  - **Storefront Page** (`/` or `/#/`): Customer menu, customizable orders, WhatsApp checkout, reviews, gallery, and FAQs.
-  - **Admin Operations Portal** (`/#/admin`): Real-time kitchen Kanban order board, live menu pricing & stock availability toggles, custom cake enquiries, delivery zones, order issue resolutions, business settings, and Supabase cloud sync.
-  - **Dedicated Order Tracking Page** (`/#/orders`): Real-time order status, preparation updates, rider dispatch, and delay notifications.
+  - **Storefront Page** (`/`): Customer menu, customizable orders, WhatsApp checkout, reviews, gallery, and FAQs.
+  - **Admin Operations Portal** (`/admin`): **Password protected** kitchen Kanban order board, live menu pricing & stock availability toggles, custom cake enquiries, delivery zones, order issue resolutions, business settings, and Supabase cloud sync.
+    - **Default Master Passcode**: `bistro123` (Can be customized in Settings).
+  - **Dedicated Order Tracking Page** (`/orders`): Real-time order status, preparation updates, rider dispatch, and delay notifications.
 - **⚡ Supabase Integration**: Realtime database synchronization with local storage fallback (`supabase-schema.sql` included).
 - **🖨️ Thermal KOT Printing**: One-click kitchen ticket printing for kitchen staff and delivery riders.
 - **📱 PWA & Mobile-First**: Responsive navigation, sticky mobile bottom order bar, and table QR menu mode.
+
+---
+
+## 🌐 Deploying on Netlify (Ready Out-of-the-Box)
+
+This project includes pre-configured `netlify.toml` and `public/_redirects` files for clean Single-Page Application (SPA) routing on Netlify.
+
+### Option A: 1-Click Netlify Import via Git
+1. Go to [Netlify](https://app.netlify.com/) and click **Add new site** → **Import an existing project**.
+2. Connect your GitHub repository.
+3. Netlify will auto-detect settings from `netlify.toml`:
+   - **Build command:** `npm run build`
+   - **Publish directory:** `dist`
+4. (Optional) Set environment variables under **Site configuration > Environment variables**:
+   - `VITE_SUPABASE_URL`: `https://mlbjulhzbhnqkzzohgcm.supabase.co`
+   - `VITE_SUPABASE_ANON_KEY`: `sb_publishable_wepmD-cYmB4FyuoS2EByeA_pzfVNM_c`
+5. Click **Deploy Site**!
+
+### Option B: Netlify CLI Manual Deploy
+```bash
+npm install -g netlify-cli
+npm run build
+netlify deploy --prod --dir=dist
+```
+
+---
+
+## 🔒 Admin Portal Security & Password
+
+- When you open `your-site.netlify.app/admin`, you are prompted with the **Admin Portal Passcode Gate** before any order or kitchen data is displayed.
+- **Default Master Passcode**: `bistro123`
+- **Changing Passcode**: Open `/admin` → enter passcode → go to the **Settings** tab → scroll to **Admin Portal Security Passcode** → enter your new passcode and click **Save Passcode**.
+- **Locking & Logging Out**: Click the **Lock & Log Out** button in the top navigation bar to immediately terminate the session and re-lock the screen.
 
 ---
 
