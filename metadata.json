@@ -1,0 +1,6 @@
+{
+  "name": "Punjabi Bistro & Bakery",
+  "description": "Official website & food ordering platform for Punjabi Bistro & Bakery in Dharamkot, Punjab. Eggless cakes, bakery items, pizza, burgers, wraps, and fast food with same-day delivery.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

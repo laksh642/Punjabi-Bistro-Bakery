@@ -1,0 +1,1725 @@
+import React, { useState } from 'react';
+import {
+  Clock,
+  CheckCircle2,
+  AlertTriangle,
+  Printer,
+  Phone,
+  MessageCircle,
+  Plus,
+  Trash2,
+  Edit2,
+  DollarSign,
+  Package,
+  Layers,
+  Cake,
+  Sliders,
+  AlertCircle,
+  TrendingUp,
+  MapPin,
+  RefreshCw,
+  ShoppingBag,
+  Power,
+  X,
+  Send,
+  Database,
+  Cloud,
+  Copy,
+  Check,
+  ExternalLink,
+} from 'lucide-react';
+import { useStore } from '../context/StoreContext';
+import { Order, OrderStatus, Product, CustomCakeEnquiry, DeliveryZone } from '../types';
+import { PunjabiBistroLogo } from './PunjabiBistroLogo';
+import { SUPABASE_SETUP_SQL, SUPABASE_URL } from '../lib/supabase';
+
+export const AdminDashboard: React.FC = () => {
+  const {
+    orders,
+    updateOrderStatus,
+    delayOrder,
+    products,
+    updateProduct,
+    toggleProductAvailability,
+    addProduct,
+    deleteProduct,
+    categories,
+    cakeEnquiries,
+    updateCakeEnquiry,
+    deliveryZones,
+    updateDeliveryZone,
+    businessSettings,
+    updateBusinessSettings,
+    issues,
+    resolveIssue,
+    feedbacks,
+    setIsAdminView,
+    supabaseStatus,
+    isCloudSyncing,
+    syncWithCloud,
+  } = useStore();
+
+  const [activeTab, setActiveTab] = useState<
+    'orders' | 'menu' | 'cakes' | 'zones' | 'issues' | 'settings' | 'analytics' | 'database'
+  >('orders');
+
+  const [copiedSql, setCopiedSql] = useState(false);
+  const handleCopySql = () => {
+    navigator.clipboard.writeText(SUPABASE_SETUP_SQL);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 2500);
+  };
+
+  // Delay Order Modal State
+  const [delayModalOrder, setDelayModalOrder] = useState<Order | null>(null);
+  const [delayMinutes, setDelayMinutes] = useState(15);
+  const [delayReason, setDelayReason] = useState(
+    'Baking fresh batch to ensure supreme freshness and hot delivery.'
+  );
+
+  // Print KOT Modal State
+  const [printOrder, setPrintOrder] = useState<Order | null>(null);
+
+  // New Product Modal State
+  const [showAddProductModal, setShowAddProductModal] = useState(false);
+  const [newProdName, setNewProdName] = useState('');
+  const [newProdPrice, setNewProdPrice] = useState(199);
+  const [newProdCat, setNewProdCat] = useState(categories[0]?.id || 'cakes');
+  const [newProdDesc, setNewProdDesc] = useState('');
+  const [newProdImage, setNewProdImage] = useState(
+    'https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=600&q=80'
+  );
+  const [newProdEggless, setNewProdEggless] = useState(true);
+  const [newProdBestseller, setNewProdBestseller] = useState(false);
+
+  // Cake Quotation State
+  const [quoteEnquiry, setQuoteEnquiry] = useState<CustomCakeEnquiry | null>(null);
+  const [quoteAmount, setQuoteAmount] = useState<number>(1200);
+  const [quoteNotes, setQuoteNotes] = useState('');
+
+  // Analytics Calculations
+  const totalRevenue = orders.reduce((sum, o) => sum + o.total, 0);
+  const activeOrders = orders.filter(
+    (o) => o.status !== 'delivered' && o.status !== 'completed' && o.status !== 'cancelled'
+  );
+  const completedOrders = orders.filter(
+    (o) => o.status === 'delivered' || o.status === 'completed'
+  );
+
+  const handleApplyDelay = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!delayModalOrder) return;
+    delayOrder(delayModalOrder.id, delayMinutes, delayReason);
+    setDelayModalOrder(null);
+  };
+
+  const handleCreateProduct = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newProdName.trim()) return;
+
+    const catObj = categories.find((c) => c.id === newProdCat);
+
+    addProduct({
+      name: newProdName.trim(),
+      description: newProdDesc.trim() || 'Delicious freshly prepared bistro treat.',
+      price: Number(newProdPrice),
+      categoryId: newProdCat,
+      categoryName: catObj ? catObj.name : 'Bakery',
+      image: newProdImage.trim(),
+      isAvailable: true,
+      isVegetarian: true,
+      isEggless: newProdEggless,
+      isBestseller: newProdBestseller,
+      prepTimeMinutes: 20,
+    });
+
+    setShowAddProductModal(false);
+    setNewProdName('');
+    setNewProdDesc('');
+  };
+
+  const handleSaveQuotation = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quoteEnquiry) return;
+    updateCakeEnquiry(quoteEnquiry.id, 'quotation_sent', Number(quoteAmount), quoteNotes);
+    setQuoteEnquiry(null);
+  };
+
+  return (
+    <div className="min-h-screen bg-stone-50 text-stone-900">
+      {/* Top Operations Header Bar */}
+      <header className="bg-emerald-950 text-white sticky top-0 z-30 shadow-md">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center gap-3">
+              <PunjabiBistroLogo className="w-10 h-10" />
+              <div>
+                <h1 className="font-serif font-bold text-base sm:text-lg leading-tight text-white">
+                  Punjabi Bistro Operations Portal
+                </h1>
+                <p className="text-[11px] text-emerald-300">
+                  Near Udham Singh Chowk, Dharamkot • Live Kitchen Board
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 sm:gap-3">
+              {/* Supabase Cloud Live Status Pill */}
+              <button
+                onClick={() => setActiveTab('database')}
+                className="flex items-center gap-1.5 bg-emerald-900/80 hover:bg-emerald-900 border border-emerald-800 px-2.5 sm:px-3 py-1.5 rounded-full text-xs transition-colors cursor-pointer"
+                title="View Supabase Cloud status and database schema"
+              >
+                <Cloud className="w-3.5 h-3.5 text-emerald-300" />
+                <span className="text-emerald-100 font-medium text-[11px] hidden md:inline">
+                  Supabase Cloud
+                </span>
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    supabaseStatus?.connected
+                      ? 'bg-emerald-400 shadow-xs shadow-emerald-400/50'
+                      : 'bg-amber-400 animate-pulse'
+                  }`}
+                />
+              </button>
+
+              {/* Quick Cloud Sync Button */}
+              <button
+                onClick={() => syncWithCloud()}
+                disabled={isCloudSyncing}
+                title="Sync with Supabase Cloud now"
+                className="flex items-center gap-1 bg-emerald-900/80 hover:bg-emerald-900 border border-emerald-800 text-emerald-200 hover:text-white px-2.5 py-1.5 rounded-xl text-xs transition-all disabled:opacity-50 cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-emerald-300 ${isCloudSyncing ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline text-[11px]">Sync</span>
+              </button>
+
+              {/* Manual Open / Close quick toggle */}
+              <button
+                onClick={() =>
+                  updateBusinessSettings({
+                    ...businessSettings,
+                    isOpenManual: !businessSettings.isOpenManual,
+                  })
+                }
+                className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full transition-all cursor-pointer ${
+                  businessSettings.isOpenManual
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                    : 'bg-rose-700 hover:bg-rose-600 text-white'
+                }`}
+              >
+                <Power className="w-3.5 h-3.5" />
+                <span>{businessSettings.isOpenManual ? 'Store: OPEN' : 'Store: CLOSED'}</span>
+              </button>
+
+              {/* Exit to customer view */}
+              <button
+                onClick={() => setIsAdminView(false)}
+                className="bg-white hover:bg-emerald-50 text-emerald-950 text-xs font-bold px-3.5 py-1.5 rounded-xl shadow-xs transition-colors cursor-pointer"
+              >
+                ← Back to Storefront
+              </button>
+            </div>
+          </div>
+
+          {/* Nav Tabs */}
+          <div className="flex items-center gap-1 overflow-x-auto pb-2 scrollbar-none text-xs font-medium">
+            <button
+              onClick={() => setActiveTab('orders')}
+              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
+                activeTab === 'orders'
+                  ? 'bg-emerald-700 text-white font-bold'
+                  : 'text-emerald-200 hover:bg-emerald-900'
+              }`}
+            >
+              <Package className="w-3.5 h-3.5" />
+              <span>Orders ({activeOrders.length} active)</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('menu')}
+              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
+                activeTab === 'menu'
+                  ? 'bg-emerald-700 text-white font-bold'
+                  : 'text-emerald-200 hover:bg-emerald-900'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Menu & Stock ({products.length})</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('cakes')}
+              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
+                activeTab === 'cakes'
+                  ? 'bg-emerald-700 text-white font-bold'
+                  : 'text-emerald-200 hover:bg-emerald-900'
+              }`}
+            >
+              <Cake className="w-3.5 h-3.5" />
+              <span>Cake Requests ({cakeEnquiries.length})</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('zones')}
+              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
+                activeTab === 'zones'
+                  ? 'bg-emerald-700 text-white font-bold'
+                  : 'text-emerald-200 hover:bg-emerald-900'
+              }`}
+            >
+              <MapPin className="w-3.5 h-3.5" />
+              <span>Delivery Zones</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('issues')}
+              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
+                activeTab === 'issues'
+                  ? 'bg-emerald-700 text-white font-bold'
+                  : 'text-emerald-200 hover:bg-emerald-900'
+              }`}
+            >
+              <AlertCircle className="w-3.5 h-3.5" />
+              <span>Issue Center ({issues.filter((i) => i.status === 'open').length})</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('analytics')}
+              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
+                activeTab === 'analytics'
+                  ? 'bg-emerald-700 text-white font-bold'
+                  : 'text-emerald-200 hover:bg-emerald-900'
+              }`}
+            >
+              <TrendingUp className="w-3.5 h-3.5" />
+              <span>Overview & Sales</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
+                activeTab === 'settings'
+                  ? 'bg-emerald-700 text-white font-bold'
+                  : 'text-emerald-200 hover:bg-emerald-900'
+              }`}
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              <span>Store Settings</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('database')}
+              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
+                activeTab === 'database'
+                  ? 'bg-emerald-700 text-white font-bold'
+                  : 'text-stone-300 hover:bg-stone-800'
+              }`}
+            >
+              <Database className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Supabase Cloud</span>
+              {supabaseStatus?.connected && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              )}
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content Area */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        {/* TAB 1: KANBAN LIVE ORDERS BOARD */}
+        {activeTab === 'orders' && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-serif text-2xl font-bold text-emerald-950">
+                  Live Kitchen Order Board
+                </h2>
+                <p className="text-xs text-stone-600">
+                  Manage incoming orders in real time. Update status or alert customers about kitchen preparation delays.
+                </p>
+              </div>
+
+              <div className="text-xs font-semibold text-stone-700 bg-white px-3 py-1.5 rounded-xl border border-emerald-100 shadow-2xs">
+                Total Orders Logged: <strong>{orders.length}</strong>
+              </div>
+            </div>
+
+            {/* Kanban Columns */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              
+              {/* Column 1: New / Confirmed */}
+              <div className="bg-white rounded-2xl border border-emerald-100 p-4 flex flex-col shadow-2xs">
+                <div className="flex items-center justify-between pb-3 mb-3 border-b border-emerald-100">
+                  <span className="font-bold text-xs uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5" />
+                    New & Confirmed
+                  </span>
+                  <span className="bg-emerald-100 text-emerald-850 text-xs font-bold px-2 py-0.5 rounded-full">
+                    {orders.filter((o) => o.status === 'new' || o.status === 'confirmed').length}
+                  </span>
+                </div>
+
+                <div className="space-y-3 overflow-y-auto max-h-[70vh]">
+                  {orders
+                    .filter((o) => o.status === 'new' || o.status === 'confirmed')
+                    .map((order) => (
+                      <OrderCard
+                        key={order.id}
+                        order={order}
+                        onUpdateStatus={(s) => updateOrderStatus(order.id, s)}
+                        onDelay={() => setDelayModalOrder(order)}
+                        onPrint={() => setPrintOrder(order)}
+                        businessSettings={businessSettings}
+                      />
+                    ))}
+                </div>
+              </div>
+
+              {/* Column 2: In Kitchen Preparing */}
+              <div className="bg-white rounded-2xl border border-emerald-100 p-4 flex flex-col shadow-2xs">
+                <div className="flex items-center justify-between pb-3 mb-3 border-b border-emerald-100">
+                  <span className="font-bold text-xs uppercase tracking-wider text-amber-800 flex items-center gap-1.5">
+                    <Package className="w-3.5 h-3.5" />
+                    Preparing in Kitchen
+                  </span>
+                  <span className="bg-amber-100 text-amber-900 text-xs font-bold px-2 py-0.5 rounded-full">
+                    {orders.filter((o) => o.status === 'preparing').length}
+                  </span>
+                </div>
+
+                <div className="space-y-3 overflow-y-auto max-h-[70vh]">
+                  {orders
+                    .filter((o) => o.status === 'preparing')
+                    .map((order) => (
+                      <OrderCard
+                        key={order.id}
+                        order={order}
+                        onUpdateStatus={(s) => updateOrderStatus(order.id, s)}
+                        onDelay={() => setDelayModalOrder(order)}
+                        onPrint={() => setPrintOrder(order)}
+                        businessSettings={businessSettings}
+                      />
+                    ))}
+                </div>
+              </div>
+
+              {/* Column 3: Ready / Out for Delivery */}
+              <div className="bg-white rounded-2xl border border-emerald-100 p-4 flex flex-col shadow-2xs">
+                <div className="flex items-center justify-between pb-3 mb-3 border-b border-emerald-100">
+                  <span className="font-bold text-xs uppercase tracking-wider text-blue-800 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Ready & Out
+                  </span>
+                  <span className="bg-blue-100 text-blue-900 text-xs font-bold px-2 py-0.5 rounded-full">
+                    {
+                      orders.filter(
+                        (o) => o.status === 'ready' || o.status === 'out_for_delivery'
+                      ).length
+                    }
+                  </span>
+                </div>
+
+                <div className="space-y-3 overflow-y-auto max-h-[70vh]">
+                  {orders
+                    .filter((o) => o.status === 'ready' || o.status === 'out_for_delivery')
+                    .map((order) => (
+                      <OrderCard
+                        key={order.id}
+                        order={order}
+                        onUpdateStatus={(s) => updateOrderStatus(order.id, s)}
+                        onDelay={() => setDelayModalOrder(order)}
+                        onPrint={() => setPrintOrder(order)}
+                        businessSettings={businessSettings}
+                      />
+                    ))}
+                </div>
+              </div>
+
+              {/* Column 4: Delivered / Completed */}
+              <div className="bg-white rounded-2xl border border-emerald-100 p-4 flex flex-col shadow-2xs">
+                <div className="flex items-center justify-between pb-3 mb-3 border-b border-emerald-100">
+                  <span className="font-bold text-xs uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Completed
+                  </span>
+                  <span className="bg-emerald-100 text-emerald-900 text-xs font-bold px-2 py-0.5 rounded-full">
+                    {completedOrders.length}
+                  </span>
+                </div>
+
+                <div className="space-y-3 overflow-y-auto max-h-[70vh]">
+                  {completedOrders.map((order) => (
+                    <OrderCard
+                      key={order.id}
+                      order={order}
+                      onUpdateStatus={(s) => updateOrderStatus(order.id, s)}
+                      onDelay={() => setDelayModalOrder(order)}
+                      onPrint={() => setPrintOrder(order)}
+                      businessSettings={businessSettings}
+                    />
+                  ))}
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: MENU & STOCK INVENTORY MANAGER */}
+        {activeTab === 'menu' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="font-serif text-2xl font-bold text-emerald-950">
+                  Menu Pricing & Live Stock Management
+                </h2>
+                <p className="text-xs text-stone-600">
+                  Toggle sold-out items instantly so customers cannot order unavailable dishes. Edit prices and badges.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setShowAddProductModal(true)}
+                className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-xs transition-colors self-start sm:self-auto cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add New Item</span>
+              </button>
+            </div>
+
+            {/* Products Table */}
+            <div className="bg-white rounded-3xl border border-emerald-100 overflow-hidden shadow-xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-stone-700">
+                  <thead className="bg-emerald-50/70 text-emerald-950 uppercase font-bold border-b border-emerald-100">
+                    <tr>
+                      <th className="p-3.5">Product</th>
+                      <th className="p-3.5">Category</th>
+                      <th className="p-3.5">Price (₹)</th>
+                      <th className="p-3.5">Dietary</th>
+                      <th className="p-3.5">Availability</th>
+                      <th className="p-3.5 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-emerald-50">
+                    {products.map((p) => (
+                      <tr key={p.id} className="hover:bg-emerald-50/40 transition-colors">
+                        <td className="p-3.5 flex items-center gap-3">
+                          <img
+                            src={p.image}
+                            alt={p.name}
+                            className="w-11 h-11 rounded-lg object-cover border border-emerald-100"
+                          />
+                          <div>
+                            <div className="font-bold text-emerald-950 text-sm">{p.name}</div>
+                            {p.isBestseller && (
+                              <span className="text-[10px] text-emerald-800 font-bold uppercase">
+                                ★ Bestseller
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-3.5 font-medium">{p.categoryName}</td>
+                        <td className="p-3.5">
+                          <input
+                            type="number"
+                            value={p.price}
+                            onChange={(e) =>
+                              updateProduct({ ...p, price: Number(e.target.value) })
+                            }
+                            className="w-20 px-2 py-1 border border-emerald-200 rounded-lg bg-emerald-50/40 font-bold text-sm text-emerald-950 focus:outline-none focus:border-emerald-600"
+                          />
+                        </td>
+                        <td className="p-3.5">
+                          <div className="flex gap-1 flex-wrap">
+                            {p.isEggless && (
+                              <span className="bg-emerald-100 text-emerald-800 text-[10px] px-1.5 py-0.5 rounded font-medium">
+                                Eggless
+                              </span>
+                            )}
+                            {p.isVegetarian && (
+                              <span className="bg-stone-100 text-stone-700 text-[10px] px-1.5 py-0.5 rounded">
+                                Veg
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-3.5">
+                          <button
+                            onClick={() => toggleProductAvailability(p.id)}
+                            className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                              p.isAvailable
+                                ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                                : 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                            }`}
+                          >
+                            {p.isAvailable ? 'In Stock ✓' : 'Sold Out ✕'}
+                          </button>
+                        </td>
+                        <td className="p-3.5 text-right">
+                          <button
+                            onClick={() => deleteProduct(p.id)}
+                            className="text-stone-400 hover:text-rose-600 p-1.5"
+                            title="Delete item"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: CUSTOM CAKE REQUESTS PIPELINE */}
+        {activeTab === 'cakes' && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="font-serif text-2xl font-bold text-emerald-950">
+                Custom Celebration Cake Enquiries
+              </h2>
+              <p className="text-xs text-stone-600">
+                Review customer design submissions, send transparent quotations, and communicate via WhatsApp.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {cakeEnquiries.map((enq) => (
+                <div
+                  key={enq.id}
+                  className="bg-white rounded-3xl border border-emerald-100 p-5 shadow-xs space-y-4"
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <span className="text-[11px] font-mono font-bold text-emerald-800">
+                        #{enq.enquiryNumber}
+                      </span>
+                      <h3 className="font-serif font-bold text-base text-emerald-950">
+                        {enq.occasion} Cake for {enq.customerName}
+                      </h3>
+                      <p className="text-xs text-stone-600">
+                        Date: <strong>{enq.eventDate}</strong> ({enq.preferredTime})
+                      </p>
+                    </div>
+
+                    <span
+                      className={`text-[11px] font-bold px-2.5 py-1 rounded-full uppercase ${
+                        enq.status === 'enquiry_received'
+                          ? 'bg-amber-100 text-amber-900 border border-amber-200'
+                          : enq.status === 'quotation_sent'
+                          ? 'bg-blue-100 text-blue-900 border border-blue-200'
+                          : 'bg-emerald-100 text-emerald-900 border border-emerald-200'
+                      }`}
+                    >
+                      {enq.status.replace('_', ' ')}
+                    </span>
+                  </div>
+
+                  {/* Specs Pill List */}
+                  <div className="grid grid-cols-2 gap-2 text-xs bg-emerald-50/50 p-3 rounded-2xl border border-emerald-100">
+                    <div>
+                      <span className="text-stone-400 block text-[10px]">Weight & Shape</span>
+                      <span className="font-bold text-emerald-950">
+                        {enq.weightKg} Kg • {enq.shape}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-stone-400 block text-[10px]">Flavour</span>
+                      <span className="font-bold text-emerald-950">{enq.flavour}</span>
+                    </div>
+                    <div className="col-span-2">
+                      <span className="text-stone-400 block text-[10px]">Text on Cake</span>
+                      <span className="font-serif italic font-bold text-emerald-800">
+                        "{enq.messageOnCake}"
+                      </span>
+                    </div>
+                    {enq.additionalNotes && (
+                      <div className="col-span-2">
+                        <span className="text-stone-400 block text-[10px]">Notes / Theme</span>
+                        <span className="text-stone-700">{enq.additionalNotes}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Reference Image Preview */}
+                  {enq.referenceImage && (
+                    <div>
+                      <span className="text-[11px] font-bold text-stone-600 block mb-1">
+                        Customer Reference Photo:
+                      </span>
+                      <img
+                        src={enq.referenceImage}
+                        alt="Reference design"
+                        className="w-full h-36 object-cover rounded-xl border border-stone-200"
+                      />
+                    </div>
+                  )}
+
+                  {/* Quotation Details */}
+                  {enq.quotationAmount && (
+                    <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs flex justify-between items-center">
+                      <span className="font-bold text-emerald-900">
+                        Quotation Sent: ₹{enq.quotationAmount}
+                      </span>
+                      {enq.adminNotes && (
+                        <span className="text-emerald-700 italic">{enq.adminNotes}</span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Action Controls */}
+                  <div className="pt-2 border-t border-emerald-100 flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setQuoteEnquiry(enq);
+                        setQuoteAmount(enq.quotationAmount || 1200);
+                      }}
+                      className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer shadow-xs"
+                    >
+                      {enq.quotationAmount ? 'Update Quote' : 'Send Quotation'}
+                    </button>
+
+                    <a
+                      href={`https://wa.me/${enq.customerWhatsApp.replace(/\s+/g, '')}?text=Hello%20${encodeURIComponent(
+                        enq.customerName
+                      )}%2C%20regarding%20your%20custom%20cake%20enquiry%20%23${
+                        enq.enquiryNumber
+                      }%20at%20Punjabi%20Bistro%20Dharamkot%3A%20${
+                        enq.quotationAmount
+                          ? `Our%20quotation%20is%20INR%20${enq.quotationAmount}.`
+                          : ''
+                      }`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="bg-emerald-850 hover:bg-emerald-900 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 transition-colors"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      <span>WhatsApp Customer</span>
+                    </a>
+
+                    <select
+                      value={enq.status}
+                      onChange={(e) =>
+                        updateCakeEnquiry(
+                          enq.id,
+                          e.target.value as CustomCakeEnquiry['status']
+                        )
+                      }
+                      className="text-xs p-2 rounded-xl border border-emerald-200 bg-emerald-50/50 ml-auto font-medium text-emerald-950 focus:outline-none focus:border-emerald-600 cursor-pointer"
+                    >
+                      <option value="enquiry_received">Enquiry Received</option>
+                      <option value="quotation_sent">Quotation Sent</option>
+                      <option value="confirmed">Confirmed / Paid</option>
+                      <option value="in_production">Baking in Kitchen</option>
+                      <option value="ready_for_pickup">Ready for Pickup</option>
+                      <option value="completed">Completed</option>
+                    </select>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 4: DELIVERY ZONES CONFIGURATION */}
+        {activeTab === 'zones' && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="font-serif text-2xl font-bold text-emerald-950">
+                Delivery Zones & Fee Settings
+              </h2>
+              <p className="text-xs text-stone-600">
+                Configure fixed rates to prevent customer confusion or unexpected fees in Dharamkot.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {deliveryZones.map((zone) => (
+                <div
+                  key={zone.id}
+                  className="bg-white rounded-3xl border border-emerald-100 p-6 shadow-xs space-y-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-serif font-bold text-base text-emerald-950">
+                      {zone.name}
+                    </h3>
+                    <span className="text-xs font-bold text-emerald-800">
+                      ₹{zone.fee}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-stone-600 leading-relaxed">{zone.description}</p>
+
+                  <div className="space-y-3 pt-2 border-t border-emerald-100">
+                    <div>
+                      <label className="block text-[11px] font-bold text-emerald-900 uppercase tracking-wider mb-1">
+                        Delivery Fee (₹)
+                      </label>
+                      <input
+                        type="number"
+                        value={zone.fee}
+                        onChange={(e) =>
+                          updateDeliveryZone({ ...zone, fee: Number(e.target.value) })
+                        }
+                        className="w-full text-xs px-3 py-2 border border-emerald-200 rounded-xl bg-emerald-50/40 text-emerald-950 focus:outline-none focus:border-emerald-600"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-emerald-900 uppercase tracking-wider mb-1">
+                        Free Delivery Threshold (₹, 0 to disable)
+                      </label>
+                      <input
+                        type="number"
+                        value={zone.freeDeliveryThreshold || 0}
+                        onChange={(e) =>
+                          updateDeliveryZone({
+                            ...zone,
+                            freeDeliveryThreshold: Number(e.target.value) || undefined,
+                          })
+                        }
+                        className="w-full text-xs px-3 py-2 border border-emerald-200 rounded-xl bg-emerald-50/40 text-emerald-950 focus:outline-none focus:border-emerald-600"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 5: CUSTOMER ISSUE RESOLUTION CENTER */}
+        {activeTab === 'issues' && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="font-serif text-2xl font-bold text-emerald-950">
+                Customer Support & Complaint Desk
+              </h2>
+              <p className="text-xs text-stone-600">
+                Track and resolve reported delivery delays, missing items, or cake issues directly.
+              </p>
+            </div>
+
+            <div className="bg-white rounded-3xl border border-emerald-100 p-6 space-y-4 shadow-xs">
+              {issues.length === 0 ? (
+                <div className="py-8 text-center text-xs text-stone-500">
+                  No active customer tickets reported.
+                </div>
+              ) : (
+                <div className="space-y-3 divide-y divide-emerald-100">
+                  {issues.map((iss) => (
+                    <div key={iss.id} className="pt-3 first:pt-0 space-y-2">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-sm text-emerald-950">
+                              {iss.customerName} ({iss.customerPhone})
+                            </span>
+                            <span className="text-xs font-mono text-emerald-800">
+                              Order #{iss.orderNumber}
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-amber-900 font-bold uppercase tracking-wider block mt-0.5">
+                            Issue: {iss.issueType.replace('_', ' ')}
+                          </span>
+                        </div>
+
+                        <span
+                          className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
+                            iss.status === 'open'
+                              ? 'bg-rose-100 text-rose-800'
+                              : 'bg-emerald-100 text-emerald-800'
+                          }`}
+                        >
+                          {iss.status.toUpperCase()}
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-stone-700 italic bg-emerald-50/40 p-2.5 rounded-xl border border-emerald-100">
+                        "{iss.description}"
+                      </p>
+
+                      {iss.resolutionNotes ? (
+                        <div className="text-xs text-emerald-800 font-medium">
+                          Resolved: {iss.resolutionNotes}
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            onClick={() => {
+                              const note = prompt(
+                                'Enter resolution notes (e.g. Sent replacement pizza / issued UPI refund):'
+                              );
+                              if (note) resolveIssue(iss.id, note);
+                            }}
+                            className="bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-emerald-800 transition-colors shadow-2xs cursor-pointer"
+                          >
+                            Mark Resolved
+                          </button>
+                          <a
+                            href={`tel:${iss.customerPhone}`}
+                            className="text-xs font-bold text-emerald-800 hover:underline"
+                          >
+                            Call Customer
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 6: BUSINESS & STORE SETTINGS */}
+        {activeTab === 'settings' && (
+          <div className="max-w-2xl bg-white rounded-3xl border border-emerald-100 p-6 sm:p-8 shadow-xs space-y-6">
+            <div>
+              <h2 className="font-serif text-2xl font-bold text-emerald-950">
+                Storefront & Operational Settings
+              </h2>
+              <p className="text-xs text-stone-600">
+                Manage public contact info, UPI configuration, and opening hours.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                  Official Phone Number
+                </label>
+                <input
+                  type="text"
+                  value={businessSettings.phone}
+                  onChange={(e) =>
+                    updateBusinessSettings({ ...businessSettings, phone: e.target.value })
+                  }
+                  className="w-full text-xs px-3 py-2 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                  WhatsApp Number (with country code, no +)
+                </label>
+                <input
+                  type="text"
+                  value={businessSettings.whatsapp}
+                  onChange={(e) =>
+                    updateBusinessSettings({ ...businessSettings, whatsapp: e.target.value })
+                  }
+                  className="w-full text-xs px-3 py-2 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                  UPI VPA Handle (for payments)
+                </label>
+                <input
+                  type="text"
+                  value={businessSettings.upiId}
+                  onChange={(e) =>
+                    updateBusinessSettings({ ...businessSettings, upiId: e.target.value })
+                  }
+                  className="w-full text-xs px-3 py-2 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                    Opening Time
+                  </label>
+                  <input
+                    type="time"
+                    value={businessSettings.openingTime}
+                    onChange={(e) =>
+                      updateBusinessSettings({
+                        ...businessSettings,
+                        openingTime: e.target.value,
+                      })
+                    }
+                    className="w-full text-xs px-3 py-2 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                    Closing Time
+                  </label>
+                  <input
+                    type="time"
+                    value={businessSettings.closingTime}
+                    onChange={(e) =>
+                      updateBusinessSettings({
+                        ...businessSettings,
+                        closingTime: e.target.value,
+                      })
+                    }
+                    className="w-full text-xs px-3 py-2 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 7: SALES OVERVIEW & METRICS */}
+        {activeTab === 'analytics' && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="font-serif text-2xl font-bold text-emerald-950">
+                Business Metrics Overview
+              </h2>
+              <p className="text-xs text-stone-600">
+                Today's revenue, order counts, and operations performance in Dharamkot.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+              <div className="bg-white p-6 rounded-3xl border border-emerald-100 shadow-xs">
+                <div className="text-xs font-bold text-emerald-800 uppercase">Total Revenue</div>
+                <div className="font-serif font-black text-3xl text-emerald-950 mt-1">
+                  ₹{totalRevenue}
+                </div>
+                <div className="text-[11px] text-stone-500 mt-1">Across all order channels</div>
+              </div>
+
+              <div className="bg-white p-6 rounded-3xl border border-emerald-100 shadow-xs">
+                <div className="text-xs font-bold text-amber-700 uppercase">Active Kitchen Orders</div>
+                <div className="font-serif font-black text-emerald-950 mt-1 text-3xl">
+                  {activeOrders.length}
+                </div>
+                <div className="text-[11px] text-stone-500 mt-1">Orders in progress right now</div>
+              </div>
+
+              <div className="bg-white p-6 rounded-3xl border border-emerald-100 shadow-xs">
+                <div className="text-xs font-bold text-emerald-700 uppercase">Custom Cake Enquiries</div>
+                <div className="font-serif font-black text-emerald-950 mt-1 text-3xl">
+                  {cakeEnquiries.length}
+                </div>
+                <div className="text-[11px] text-stone-500 mt-1">Celebration orders logged</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 8: SUPABASE CLOUD DATABASE & REALTIME */}
+        {activeTab === 'database' && (
+          <div className="space-y-6">
+            {/* Header & Quick Actions */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-emerald-100 shadow-xs">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-100 flex items-center justify-center text-emerald-700 flex-shrink-0">
+                  <Database className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="font-serif text-xl sm:text-2xl font-bold text-emerald-950">
+                      Supabase Cloud Database
+                    </h2>
+                    <span
+                      className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
+                        supabaseStatus?.connected
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}
+                    >
+                      {supabaseStatus?.connected ? 'Live Connected' : 'Configured'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-stone-600 mt-1">
+                    Realtime PostgreSQL cloud synchronization for orders, custom cake enquiries, reviews, and support tickets.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => syncWithCloud()}
+                  disabled={isCloudSyncing}
+                  className="flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isCloudSyncing ? 'animate-spin' : ''}`} />
+                  <span>{isCloudSyncing ? 'Syncing...' : 'Sync Cloud Now'}</span>
+                </button>
+
+                <a
+                  href="https://supabase.com/dashboard/project/mlbjulhzbhnqkzzohgcm"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold px-4 py-2.5 rounded-xl transition-colors"
+                >
+                  <span>Dashboard</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+            </div>
+
+            {/* Connection & Status Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white p-5 rounded-2xl border border-emerald-100 space-y-2">
+                <div className="text-xs font-bold text-stone-500 uppercase tracking-wider">
+                  Project Endpoint
+                </div>
+                <div className="font-mono text-xs text-emerald-950 font-semibold break-all bg-emerald-50/50 p-2 rounded-lg border border-emerald-100">
+                  {SUPABASE_URL}
+                </div>
+                <div className="text-[11px] text-stone-500 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                  <span>Direct REST & WebSocket Gateway</span>
+                </div>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-emerald-100 space-y-2">
+                <div className="text-xs font-bold text-stone-500 uppercase tracking-wider">
+                  Realtime Channel
+                </div>
+                <div className="font-mono text-xs text-emerald-800 font-bold bg-emerald-50 p-2 rounded-lg border border-emerald-200 flex items-center justify-between">
+                  <span>pb-live-sync</span>
+                  <span className="text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded">SUBSCRIBED</span>
+                </div>
+                <div className="text-[11px] text-stone-500">
+                  Kitchen order updates & new cake enquiries stream live to all active screens.
+                </div>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-emerald-100 space-y-2">
+                <div className="text-xs font-bold text-stone-500 uppercase tracking-wider">
+                  Local Cache & Fallback
+                </div>
+                <div className="font-mono text-xs text-amber-900 font-bold bg-amber-50 p-2 rounded-lg border border-amber-200 flex items-center justify-between">
+                  <span>localStorage</span>
+                  <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">HYBRID ACTIVE</span>
+                </div>
+                <div className="text-[11px] text-stone-500">
+                  Zero downtime: offline orders persist locally and reconcile when connection restores.
+                </div>
+              </div>
+            </div>
+
+            {/* Cloud Tables Status Matrix */}
+            <div className="bg-white rounded-3xl border border-emerald-200 p-6 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-serif font-bold text-lg text-emerald-950">
+                    Database Tables & Replication Health
+                  </h3>
+                  <p className="text-xs text-stone-500">
+                    Live verification against your Supabase PostgreSQL instance
+                  </p>
+                </div>
+                <button
+                  onClick={() => syncWithCloud()}
+                  className="text-xs text-emerald-700 hover:text-emerald-800 font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  <RefreshCw className="w-3 h-3" /> Re-check Tables
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-bold text-emerald-950">public.orders</span>
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        supabaseStatus?.tablesStatus.orders ? 'bg-emerald-500' : 'bg-amber-400'
+                      }`}
+                    />
+                  </div>
+                  <div className="text-2xl font-bold font-serif text-emerald-950">{orders.length}</div>
+                  <div className="text-[11px] text-emerald-850/70">Orders synced • Realtime enabled</div>
+                </div>
+
+                <div className="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-bold text-emerald-950">custom_cake_enquiries</span>
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        supabaseStatus?.tablesStatus.cake_enquiries ? 'bg-emerald-500' : 'bg-amber-400'
+                      }`}
+                    />
+                  </div>
+                  <div className="text-2xl font-bold font-serif text-emerald-950">{cakeEnquiries.length}</div>
+                  <div className="text-[11px] text-emerald-850/70">Enquiries synced • Realtime enabled</div>
+                </div>
+
+                <div className="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-bold text-emerald-950">public.reviews</span>
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        supabaseStatus?.tablesStatus.reviews ? 'bg-emerald-500' : 'bg-amber-400'
+                      }`}
+                    />
+                  </div>
+                  <div className="text-2xl font-bold font-serif text-emerald-950">{feedbacks.length + 3}</div>
+                  <div className="text-[11px] text-emerald-850/70">Customer ratings & reviews</div>
+                </div>
+
+                <div className="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-bold text-emerald-950">customer_issues</span>
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        supabaseStatus?.tablesStatus.customer_issues ? 'bg-emerald-500' : 'bg-amber-400'
+                      }`}
+                    />
+                  </div>
+                  <div className="text-2xl font-bold font-serif text-emerald-950">{issues.length}</div>
+                  <div className="text-[11px] text-emerald-850/70">Escalated support tickets</div>
+                </div>
+              </div>
+            </div>
+
+            {/* SQL Setup Script & 1-Click Copy */}
+            <div className="bg-white rounded-3xl border border-emerald-200 p-6 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-serif font-bold text-lg text-emerald-950">
+                    Supabase Schema Setup Script
+                  </h3>
+                  <p className="text-xs text-stone-500">
+                    Run this SQL script in your Supabase project SQL Editor to instantiate all tables, security policies, and realtime broadcast publications.
+                  </p>
+                </div>
+
+                <button
+                  onClick={handleCopySql}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer shadow-xs bg-emerald-700 hover:bg-emerald-800 text-white"
+                >
+                  {copiedSql ? (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Copied to Clipboard!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span>Copy SQL Setup (1-Click)</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Instructions Steps */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-100">
+                  <div className="font-bold text-emerald-800 mb-1">Step 1: Open SQL Editor</div>
+                  <div className="text-stone-600">
+                    Open your Supabase dashboard at{' '}
+                    <a
+                      href="https://supabase.com/dashboard/project/mlbjulhzbhnqkzzohgcm/sql"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline text-emerald-700 font-semibold"
+                    >
+                      Project SQL Editor
+                    </a>
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-100">
+                  <div className="font-bold text-emerald-800 mb-1">Step 2: Paste SQL</div>
+                  <div className="text-stone-600">
+                    Click the <strong>"Copy SQL Setup (1-Click)"</strong> button above and paste into the editor window.
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-100">
+                  <div className="font-bold text-emerald-800 mb-1">Step 3: Click Run</div>
+                  <div className="text-stone-600">
+                    Press <strong>Run</strong> in Supabase. Tables and Realtime streaming will be live immediately!
+                  </div>
+                </div>
+              </div>
+
+              {/* SQL Code Preview */}
+              <div className="relative">
+                <div className="flex items-center justify-between bg-stone-900 text-stone-300 px-4 py-2 rounded-t-2xl text-xs font-mono">
+                  <span>supabase-schema.sql</span>
+                  <span className="text-stone-400 text-[11px]">PostgreSQL DDL</span>
+                </div>
+                <pre className="bg-stone-950 text-stone-200 font-mono text-[11px] p-4 rounded-b-2xl overflow-x-auto max-h-72 leading-relaxed">
+                  <code>{SUPABASE_SETUP_SQL}</code>
+                </pre>
+              </div>
+            </div>
+          </div>
+        )}
+
+      </main>
+
+      {/* DELAY ORDER POPUP (Proactive transparency tool) */}
+      {delayModalOrder && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onClick={() => setDelayModalOrder(null)}
+        >
+          <div
+            className="bg-white rounded-3xl max-w-md w-full border border-emerald-200 p-6 shadow-2xl space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-600" />
+                <h3 className="font-serif font-bold text-lg text-emerald-950">
+                  Alert Delay on Order #{delayModalOrder.orderNumber}
+                </h3>
+              </div>
+              <button
+                onClick={() => setDelayModalOrder(null)}
+                className="p-1 rounded-full hover:bg-stone-100 text-stone-500 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-stone-600 leading-relaxed">
+              Informing the customer early avoids bad Google reviews. This will instantly display a clear delay badge on their live tracking screen.
+            </p>
+
+            <form onSubmit={handleApplyDelay} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                  Delay Minutes
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[10, 15, 20, 30].map((m) => (
+                    <button
+                      type="button"
+                      key={m}
+                      onClick={() => setDelayMinutes(m)}
+                      className={`py-2 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
+                        delayMinutes === m
+                          ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                          : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50'
+                      }`}
+                    >
+                      +{m} Mins
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                  Explanation to Customer
+                </label>
+                <textarea
+                  rows={2}
+                  value={delayReason}
+                  onChange={(e) => setDelayReason(e.target.value)}
+                  className="w-full text-xs px-3 py-2 rounded-xl border border-stone-200 bg-white focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDelayModalOrder(null)}
+                  className="px-4 py-2 rounded-xl border border-stone-200 text-xs font-semibold text-stone-600 hover:bg-stone-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold py-2 rounded-xl transition-colors shadow-sm cursor-pointer"
+                >
+                  Broadcast Delay to Tracker
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* PRINT KOT / RECEIPT MODAL */}
+      {printOrder && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setPrintOrder(null)}
+        >
+          <div
+            className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-stone-300 font-mono text-xs space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-center border-b pb-3 border-dashed border-stone-400">
+              <div className="font-bold text-sm">PUNJABI BISTRO & BAKERY</div>
+              <div className="text-[10px]">Near Udham Singh Chowk, Dharamkot</div>
+              <div className="text-[10px]">Ph: 098562 04951</div>
+              <div className="font-bold text-xs mt-2">
+                KITCHEN TICKET #{printOrder.orderNumber}
+              </div>
+              <div className="text-[10px]">{new Date().toLocaleString()}</div>
+            </div>
+
+            <div className="text-[11px] space-y-1">
+              <div>
+                <strong>Customer:</strong> {printOrder.customerName} ({printOrder.customerPhone})
+              </div>
+              <div>
+                <strong>Type:</strong> {printOrder.orderType.toUpperCase()}
+                {printOrder.tableNumber ? ` • ${printOrder.tableNumber}` : ''}
+              </div>
+              {printOrder.deliveryAddress && (
+                <div>
+                  <strong>Address:</strong> {printOrder.deliveryAddress}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-b border-dashed border-stone-400 py-2 space-y-1.5">
+              {printOrder.items.map((it, idx) => (
+                <div key={idx} className="flex justify-between font-bold">
+                  <span>
+                    {it.quantity}x {it.product.name}
+                  </span>
+                  <span>₹{it.totalPrice}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-between font-bold text-sm">
+              <span>TOTAL DUE:</span>
+              <span>₹{printOrder.total}</span>
+            </div>
+
+            <div className="pt-3 flex gap-2">
+              <button
+                onClick={() => setPrintOrder(null)}
+                className="flex-1 py-1.5 rounded-lg border border-stone-300 text-stone-600"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => window.print()}
+                className="flex-1 py-1.5 rounded-lg bg-stone-900 text-white font-bold"
+              >
+                Print Slip
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SEND QUOTATION MODAL */}
+      {quoteEnquiry && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
+          onClick={() => setQuoteEnquiry(null)}
+        >
+          <div
+            className="bg-white rounded-3xl max-w-md w-full border border-emerald-200 p-6 shadow-2xl space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-serif font-bold text-lg text-emerald-950">
+              Cake Quotation for {quoteEnquiry.customerName}
+            </h3>
+            <p className="text-xs text-stone-600">
+              Cake: {quoteEnquiry.flavour} ({quoteEnquiry.weightKg} Kg, {quoteEnquiry.shape})
+            </p>
+
+            <form onSubmit={handleSaveQuotation} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                  Quotation Amount (₹) *
+                </label>
+                <input
+                  type="number"
+                  required
+                  value={quoteAmount}
+                  onChange={(e) => setQuoteAmount(Number(e.target.value))}
+                  className="w-full text-sm px-3.5 py-2.5 rounded-xl border border-emerald-200 bg-white font-bold text-emerald-800 focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                  Baker Note to Customer
+                </label>
+                <input
+                  type="text"
+                  value={quoteNotes}
+                  onChange={(e) => setQuoteNotes(e.target.value)}
+                  placeholder="e.g. Includes custom figurine topper and complimentary candle knife set."
+                  className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-emerald-200 bg-white focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setQuoteEnquiry(null)}
+                  className="px-4 py-2.5 rounded-xl border border-stone-200 text-xs font-semibold text-stone-600 hover:bg-stone-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 bg-emerald-700 text-white text-xs font-bold py-2.5 rounded-xl hover:bg-emerald-800 transition-colors shadow-xs cursor-pointer"
+                >
+                  Save & Confirm Quotation
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ADD NEW PRODUCT MODAL */}
+      {showAddProductModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
+          onClick={() => setShowAddProductModal(false)}
+        >
+          <div
+            className="bg-white rounded-3xl max-w-lg w-full border border-emerald-200 p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="font-serif font-bold text-lg text-emerald-950">
+                Add New Menu Item
+              </h3>
+              <button
+                onClick={() => setShowAddProductModal(false)}
+                className="p-1 rounded-full hover:bg-stone-100 text-stone-500 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateProduct} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                  Item Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newProdName}
+                  onChange={(e) => setNewProdName(e.target.value)}
+                  placeholder="e.g. Tandoori Paneer Pizza"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-emerald-200 bg-white focus:outline-none focus:border-emerald-600 text-emerald-950"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                    Price (₹) *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    value={newProdPrice}
+                    onChange={(e) => setNewProdPrice(Number(e.target.value))}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-emerald-200 bg-white focus:outline-none focus:border-emerald-600 text-emerald-950"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                    Category
+                  </label>
+                  <select
+                    value={newProdCat}
+                    onChange={(e) => setNewProdCat(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-emerald-200 bg-white focus:outline-none focus:border-emerald-600 text-emerald-950"
+                  >
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                  Short Description
+                </label>
+                <textarea
+                  rows={2}
+                  value={newProdDesc}
+                  onChange={(e) => setNewProdDesc(e.target.value)}
+                  placeholder="e.g. Crispy crust topped with marinated paneer, diced capsicum and mozzarella."
+                  className="w-full px-3.5 py-2 rounded-xl border border-emerald-200 bg-white focus:outline-none focus:border-emerald-600 text-emerald-950"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                  Image URL
+                </label>
+                <input
+                  type="url"
+                  value={newProdImage}
+                  onChange={(e) => setNewProdImage(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-emerald-200 bg-white focus:outline-none focus:border-emerald-600 text-emerald-950"
+                />
+              </div>
+
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newProdEggless}
+                    onChange={(e) => setNewProdEggless(e.target.checked)}
+                  />
+                  <span>100% Eggless</span>
+                </label>
+
+                <label className="flex items-center gap-2 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newProdBestseller}
+                    onChange={(e) => setNewProdBestseller(e.target.checked)}
+                  />
+                  <span>Mark as Bestseller</span>
+                </label>
+              </div>
+
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddProductModal(false)}
+                  className="px-4 py-2.5 rounded-xl border border-stone-200 font-semibold text-stone-600 hover:bg-stone-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 bg-emerald-700 text-white font-bold py-2.5 rounded-xl hover:bg-emerald-800 transition-colors shadow-xs cursor-pointer"
+                >
+                  Save Item to Menu
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+};
+
+// Reusable Order Card for Kanban
+interface OrderCardProps {
+  order: Order;
+  onUpdateStatus: (status: OrderStatus) => void;
+  onDelay: () => void;
+  onPrint: () => void;
+  businessSettings: any;
+}
+
+const OrderCard: React.FC<OrderCardProps> = ({
+  order,
+  onUpdateStatus,
+  onDelay,
+  onPrint,
+  businessSettings,
+}) => {
+  return (
+    <div className="bg-white rounded-2xl border border-emerald-100 p-3.5 shadow-xs space-y-2.5 text-xs">
+      <div className="flex items-start justify-between">
+        <div>
+          <span className="font-mono font-bold text-emerald-800 text-sm">
+            #{order.orderNumber}
+          </span>
+          <div className="font-bold text-emerald-950">{order.customerName}</div>
+          <div className="text-[11px] text-stone-500">{order.customerPhone}</div>
+        </div>
+
+        <div className="text-right">
+          <span className="font-bold text-sm text-emerald-950">₹{order.total}</span>
+          <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded font-bold uppercase block mt-0.5">
+            {order.orderType}
+          </span>
+        </div>
+      </div>
+
+      {/* Delay alert banner on card */}
+      {order.delayMinutes && order.delayMinutes > 0 && (
+        <div className="p-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[10px] font-semibold flex items-center gap-1">
+          <AlertTriangle className="w-3 h-3 text-amber-600 flex-shrink-0" />
+          <span>Delayed by +{order.delayMinutes} mins</span>
+        </div>
+      )}
+
+      {/* Items preview */}
+      <div className="space-y-0.5 text-[11px] text-stone-700 border-t border-stone-100 pt-1.5">
+        {order.items.map((it, idx) => (
+          <div key={idx} className="flex justify-between">
+            <span>
+              {it.quantity}x {it.product.name}
+            </span>
+            <span className="text-stone-400">₹{it.totalPrice}</span>
+          </div>
+        ))}
+      </div>
+
+      {order.deliveryAddress && (
+        <div className="text-[10px] text-stone-500 line-clamp-1">
+          📍 {order.deliveryAddress}
+        </div>
+      )}
+
+      {/* Action Buttons */}
+      <div className="pt-2 border-t border-stone-100 flex flex-wrap items-center gap-1.5">
+        <select
+          value={order.status}
+          onChange={(e) => onUpdateStatus(e.target.value as OrderStatus)}
+          className="text-[11px] p-1.5 rounded-lg border border-emerald-200 bg-emerald-50/50 font-semibold text-emerald-950 focus:outline-none focus:border-emerald-600 cursor-pointer"
+        >
+          <option value="new">New</option>
+          <option value="confirmed">Confirmed</option>
+          <option value="preparing">In Kitchen</option>
+          <option value="ready">Ready</option>
+          <option value="out_for_delivery">Out for Delivery</option>
+          <option value="delivered">Delivered</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+
+        <button
+          onClick={onDelay}
+          className="p-1.5 rounded-lg border border-amber-300 hover:bg-amber-50 text-amber-800 text-[10px] font-bold cursor-pointer"
+          title="Broadcast Delay to Customer"
+        >
+          +Delay
+        </button>
+
+        <button
+          onClick={onPrint}
+          className="p-1.5 rounded-lg border border-stone-200 hover:bg-stone-50 text-stone-700 cursor-pointer"
+          title="Print Kitchen Ticket"
+        >
+          <Printer className="w-3 h-3" />
+        </button>
+
+        <a
+          href={`https://wa.me/${order.customerPhone.replace(/\s+/g, '')}?text=Hello%20${encodeURIComponent(
+            order.customerName
+          )}%2C%20regarding%20your%20order%20%23${order.orderNumber}%20at%20Punjabi%20Bistro%3A%20Status%20is%20now%20${
+            order.status
+          }.`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="p-1.5 rounded-lg border border-emerald-300 hover:bg-emerald-50 text-emerald-800"
+          title="WhatsApp Customer"
+        >
+          <MessageCircle className="w-3 h-3 text-emerald-600" />
+        </a>
+      </div>
+    </div>
+  );
+};
