@@ -13,8 +13,8 @@
 - **🚚 Zone-Based Delivery**: Fixed-rate instant delivery for Dharamkot Town, Kot Ise Khan Road, Jalalabad Road, and surrounding villages.
 - **📱 Separate Storefront & Admin Portal**:
   - **Storefront Page** (`/`): Customer menu, customizable orders, WhatsApp checkout, reviews, gallery, and FAQs.
-  - **Admin Operations Portal** (`/admin`): **Password protected** kitchen Kanban order board, live menu pricing & stock availability toggles, custom cake enquiries, delivery zones, order issue resolutions, business settings, and Supabase cloud sync.
-    - **Default Master Passcode**: `bistro123` (Can be customized in Settings).
+  - **Admin Operations Portal** (`/admin`): **Securely protected by Supabase Auth with Google OAuth**. Features kitchen Kanban order board, live menu pricing & stock availability toggles, custom cake enquiries, delivery zones, order issue resolutions, business settings, and Supabase cloud sync.
+    - **No passwords**: Access is granted strictly to authorized Google accounts in `public.admin_users`.
   - **Dedicated Order Tracking Page** (`/orders`): Real-time order status, preparation updates, rider dispatch, and delay notifications.
 - **⚡ Supabase Integration**: Realtime database synchronization with local storage fallback (`supabase-schema.sql` included).
 - **🖨️ Thermal KOT Printing**: One-click kitchen ticket printing for kitchen staff and delivery riders.
@@ -46,12 +46,13 @@ netlify deploy --prod --dir=dist
 
 ---
 
-## 🔒 Admin Portal Security & Password
+## 🔒 Admin Portal Security & Google OAuth Authentication
 
-- When you open `your-site.netlify.app/admin`, you are prompted with the **Admin Portal Passcode Gate** before any order or kitchen data is displayed.
-- **Default Master Passcode**: `bistro123`
-- **Changing Passcode**: Open `/admin` → enter passcode → go to the **Settings** tab → scroll to **Admin Portal Security Passcode** → enter your new passcode and click **Save Passcode**.
-- **Locking & Logging Out**: Click the **Lock & Log Out** button in the top navigation bar to immediately terminate the session and re-lock the screen.
+- **Zero-Password Security**: Access to `/admin` requires signing in through **Google OAuth** powered by **Supabase Auth**.
+- **Role-Based Access Control (RBAC)**: An account is only admitted if it exists in the `public.admin_users` table with `is_active = true`.
+- **Row Level Security (RLS)**: Database write operations (creating/editing products, changing order statuses, uploading images) are strictly enforced at the database level by PostgreSQL RLS using `public.is_admin(auth.uid())`.
+- **Managing Admin Accounts**: Authorized bakery owners can add or revoke staff accounts directly inside the **Settings** tab via the **Admin Access & Google OAuth Management** panel.
+- **Logging Out**: Click the **Sign Out** button in the top navigation bar to terminate the Supabase session.
 
 ---
 

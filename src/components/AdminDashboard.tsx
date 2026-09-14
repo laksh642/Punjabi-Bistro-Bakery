@@ -28,7 +28,6 @@ import {
   Check,
   ExternalLink,
   Lock,
-  KeyRound,
   Shield,
 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
@@ -36,6 +35,7 @@ import { Order, OrderStatus, Product, CustomCakeEnquiry, DeliveryZone } from '..
 import { PunjabiBistroLogo } from './PunjabiBistroLogo';
 import { SUPABASE_SETUP_SQL, SUPABASE_URL } from '../lib/supabase';
 import { ProductImageManager } from './ProductImageManager';
+import { AdminUsersManager } from './AdminUsersManager';
 
 export const AdminDashboard: React.FC = () => {
   const {
@@ -145,32 +145,6 @@ export const AdminDashboard: React.FC = () => {
   const [quoteEnquiry, setQuoteEnquiry] = useState<CustomCakeEnquiry | null>(null);
   const [quoteAmount, setQuoteAmount] = useState<number>(1200);
   const [quoteNotes, setQuoteNotes] = useState('');
-
-  // Admin Portal Password Management
-  const [currentAdminPassword, setCurrentAdminPassword] = useState(() => {
-    return localStorage.getItem('pb_admin_password') || 'bistro123';
-  });
-  const [newAdminPasswordInput, setNewAdminPasswordInput] = useState('');
-  const [passwordChangeSuccess, setPasswordChangeSuccess] = useState(false);
-
-  const handleUpdatePassword = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newAdminPasswordInput.trim()) return;
-    localStorage.setItem('pb_admin_password', newAdminPasswordInput.trim());
-    window.dispatchEvent(new Event('storage'));
-    setCurrentAdminPassword(newAdminPasswordInput.trim());
-    setNewAdminPasswordInput('');
-    setPasswordChangeSuccess(true);
-    setTimeout(() => setPasswordChangeSuccess(false), 3000);
-  };
-
-  const handleResetPassword = () => {
-    localStorage.setItem('pb_admin_password', 'bistro123');
-    window.dispatchEvent(new Event('storage'));
-    setCurrentAdminPassword('bistro123');
-    setPasswordChangeSuccess(true);
-    setTimeout(() => setPasswordChangeSuccess(false), 3000);
-  };
 
   // Analytics Calculations
   const totalRevenue = orders.reduce((sum, o) => sum + o.total, 0);
@@ -1077,70 +1051,8 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Admin Portal Security & Passcode Management */}
-            <div className="pt-6 border-t border-emerald-100 space-y-4">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-800">
-                  <KeyRound className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="font-serif font-bold text-base text-emerald-950">
-                    Admin Portal Security Passcode
-                  </h3>
-                  <p className="text-xs text-stone-500">
-                    This password restricts unauthorized access to this staff dashboard.
-                  </p>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <span className="text-[11px] uppercase tracking-wider text-stone-500 font-bold block">
-                    Current Active Passcode
-                  </span>
-                  <span className="font-mono text-base font-bold text-emerald-900">
-                    {currentAdminPassword}
-                  </span>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleResetPassword}
-                  className="text-xs font-semibold text-stone-600 hover:text-emerald-800 underline self-start sm:self-auto cursor-pointer"
-                >
-                  Reset to Default (bistro123)
-                </button>
-              </div>
-
-              <form onSubmit={handleUpdatePassword} className="space-y-3">
-                <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900">
-                  Set New Admin Passcode
-                </label>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    value={newAdminPasswordInput}
-                    onChange={(e) => setNewAdminPasswordInput(e.target.value)}
-                    placeholder="Enter new custom passcode..."
-                    className="flex-1 text-xs px-3 py-2.5 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!newAdminPasswordInput.trim()}
-                    className="px-5 py-2.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer shadow-xs"
-                  >
-                    Save Passcode
-                  </button>
-                </div>
-              </form>
-
-              {passwordChangeSuccess && (
-                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>Admin passcode updated successfully! Saved for all upcoming sessions.</span>
-                </div>
-              )}
-            </div>
+            {/* Admin Portal Security & Google OAuth Allowlist Management */}
+            <AdminUsersManager />
           </div>
         )}
 

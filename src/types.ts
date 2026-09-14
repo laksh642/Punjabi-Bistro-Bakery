@@ -176,3 +176,11 @@ export interface ReviewItem {
   verifiedCustomer?: boolean;
   ownerReply?: string;
 }
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  role: 'owner' | 'admin' | 'manager';
+  isActive: boolean;
+  createdAt: string;
+}

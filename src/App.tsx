@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { StoreProvider } from './context/StoreContext';
+import { AdminAuthProvider } from './context/AdminAuthContext';
 import { StorefrontPage } from './pages/StorefrontPage';
 import { AdminPage } from './pages/AdminPage';
 import { OrderTrackingPage } from './pages/OrderTrackingPage';
@@ -22,16 +23,18 @@ function HashRedirector() {
 export default function App() {
   return (
     <StoreProvider>
-      <BrowserRouter>
-        <HashRedirector />
-        <Routes>
-          <Route path="/" element={<StorefrontPage />} />
-          <Route path="/admin" element={<AdminPage />} />
-          <Route path="/orders" element={<OrderTrackingPage />} />
-          <Route path="/tracking" element={<OrderTrackingPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
+      <AdminAuthProvider>
+        <BrowserRouter>
+          <HashRedirector />
+          <Routes>
+            <Route path="/" element={<StorefrontPage />} />
+            <Route path="/admin" element={<AdminPage />} />
+            <Route path="/orders" element={<OrderTrackingPage />} />
+            <Route path="/tracking" element={<OrderTrackingPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </AdminAuthProvider>
     </StoreProvider>
   );
 }

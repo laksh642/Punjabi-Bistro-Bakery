@@ -1,5 +1,5 @@
-import { createClient } from '@supabase/supabase-js';
-import { Order, CustomCakeEnquiry, ReviewItem, CustomerIssue, OrderStatus, Product } from '../types';
+import { createClient, User, Session } from '@supabase/supabase-js';
+import { Order, CustomCakeEnquiry, ReviewItem, CustomerIssue, OrderStatus, Product, AdminUser } from '../types';
 
 // Supabase project credentials (provided by user)
 export const SUPABASE_URL =
@@ -33,6 +33,7 @@ export interface ConnectionStatus {
     reviews: boolean;
     issues: boolean;
     products: boolean;
+    admin_users: boolean;
     storage: boolean;
   };
 }
@@ -50,6 +51,7 @@ export async function testSupabaseConnection(): Promise<ConnectionStatus> {
       reviews: false,
       issues: false,
       products: false,
+      admin_users: false,
       storage: false,
     },
   };
@@ -60,12 +62,13 @@ export async function testSupabaseConnection(): Promise<ConnectionStatus> {
   }
 
   try {
-    const [ordersRes, cakesRes, reviewsRes, issuesRes, productsRes] = await Promise.all([
+    const [ordersRes, cakesRes, reviewsRes, issuesRes, productsRes, adminsRes] = await Promise.all([
       supabase.from('orders').select('id').limit(1),
       supabase.from('custom_cake_enquiries').select('id').limit(1),
       supabase.from('reviews').select('id').limit(1),
       supabase.from('customer_issues').select('id').limit(1),
       supabase.from('products').select('id').limit(1),
+      supabase.from('admin_users').select('id').limit(1),
     ]);
 
     result.tablesStatus.orders = !ordersRes.error;
@@ -73,6 +76,7 @@ export async function testSupabaseConnection(): Promise<ConnectionStatus> {
     result.tablesStatus.reviews = !reviewsRes.error;
     result.tablesStatus.issues = !issuesRes.error;
     result.tablesStatus.products = !productsRes.error;
+    result.tablesStatus.admin_users = !adminsRes.error;
 
     // Check storage bucket
     try {
@@ -91,12 +95,13 @@ export async function testSupabaseConnection(): Promise<ConnectionStatus> {
       result.tablesStatus.reviews,
       result.tablesStatus.issues,
       result.tablesStatus.products,
+      result.tablesStatus.admin_users,
     ].filter(Boolean).length;
 
-    if (activeCount === 5) {
-      result.message = 'All database tables synced and operational in Supabase cloud.';
+    if (activeCount === 6) {
+      result.message = 'All database tables and admin authorization synced in Supabase cloud.';
     } else if (activeCount > 0) {
-      result.message = `Connected (${activeCount}/5 tables ready). Click 'Setup Schema' if needed.`;
+      result.message = `Connected (${activeCount}/6 tables ready). Click 'Setup Schema' if needed.`;
     } else {
       result.message = 'Supabase reachable! Ready for initial database table creation.';
     }
@@ -653,9 +658,200 @@ export async function deleteProductFromCloud(productId: string): Promise<boolean
   }
 }
 
+// -------------------------------------------------------------
+// Supabase Authentication & Admin Authorization (Google OAuth)
+// -------------------------------------------------------------
+
+/**
+ * Sign in to the Admin Portal using Google OAuth via Supabase Auth.
+ * Redirects back to /admin on the current origin (Netlify or preview).
+ */
+export async function signInWithGoogle(returnPath: string = '/admin'): Promise<{ error: Error | null }> {
+  if (!isSupabaseConfigured) {
+    return { error: new Error('Supabase is not configured. Please check environment variables.') };
+  }
+
+  try {
+    const redirectUrl = `${window.location.origin}${returnPath}`;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: redirectUrl,
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'consent',
+        },
+      },
+    });
+
+    return { error: error ? new Error(error.message) : null };
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err : new Error('Failed to initiate Google OAuth') };
+  }
+}
+
+/**
+ * Sign out the currently authenticated admin, terminating the Supabase session.
+ */
+export async function signOutAdmin(): Promise<{ error: Error | null }> {
+  if (!isSupabaseConfigured) return { error: null };
+  try {
+    const { error } = await supabase.auth.signOut();
+    return { error: error ? new Error(error.message) : null };
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err : new Error('Failed to sign out') };
+  }
+}
+
+/**
+ * Check whether an authenticated user is an authorized bakery administrator in public.admin_users.
+ */
+export async function checkAdminAuthorization(userId: string): Promise<{
+  isAuthorized: boolean;
+  role: string | null;
+  adminRecord: AdminUser | null;
+  error: string | null;
+}> {
+  if (!isSupabaseConfigured || !userId) {
+    return {
+      isAuthorized: false,
+      role: null,
+      adminRecord: null,
+      error: 'Supabase not configured or missing User ID',
+    };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('admin_users')
+      .select('id, email, role, is_active, created_at')
+      .eq('id', userId)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (error) {
+      if (error.code === '42P01') {
+        return {
+          isAuthorized: false,
+          role: null,
+          adminRecord: null,
+          error: 'admin_users table not created yet in Supabase schema.',
+        };
+      }
+      return {
+        isAuthorized: false,
+        role: null,
+        adminRecord: null,
+        error: error.message,
+      };
+    }
+
+    if (data && data.is_active) {
+      return {
+        isAuthorized: true,
+        role: data.role || 'admin',
+        adminRecord: {
+          id: data.id,
+          email: data.email,
+          role: data.role,
+          isActive: data.is_active,
+          createdAt: data.created_at,
+        },
+        error: null,
+      };
+    }
+
+    return {
+      isAuthorized: false,
+      role: null,
+      adminRecord: null,
+      error: null,
+    };
+  } catch (err: unknown) {
+    return {
+      isAuthorized: false,
+      role: null,
+      adminRecord: null,
+      error: err instanceof Error ? err.message : 'Unknown authorization error',
+    };
+  }
+}
+
+/**
+ * Fetch all registered administrators from public.admin_users (authorized admin only).
+ */
+export async function fetchAdminUsers(): Promise<AdminUser[]> {
+  if (!isSupabaseConfigured) return [];
+  try {
+    const { data, error } = await supabase
+      .from('admin_users')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.warn('Supabase fetchAdminUsers notice:', error.message);
+      return [];
+    }
+
+    return (data || []).map((row: any) => ({
+      id: row.id,
+      email: row.email,
+      role: row.role || 'admin',
+      isActive: Boolean(row.is_active),
+      createdAt: row.created_at,
+    }));
+  } catch (err) {
+    console.warn('Supabase fetchAdminUsers error:', err);
+    return [];
+  }
+}
+
+/**
+ * Add or update an administrator in public.admin_users.
+ */
+export async function saveAdminUser(admin: {
+  id: string;
+  email: string;
+  role?: 'owner' | 'admin' | 'manager';
+  isActive?: boolean;
+}): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    const payload = {
+      id: admin.id,
+      email: admin.email,
+      role: admin.role || 'admin',
+      is_active: admin.isActive !== undefined ? admin.isActive : true,
+    };
+
+    const { error } = await supabase.from('admin_users').upsert(payload, { onConflict: 'id' });
+    if (error) {
+      console.warn('Supabase saveAdminUser error:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Supabase saveAdminUser error:', err);
+    return false;
+  }
+}
+
+/**
+ * Delete or revoke an administrator in public.admin_users.
+ */
+export async function deleteAdminUser(adminId: string): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    const { error } = await supabase.from('admin_users').delete().eq('id', adminId);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
 export const SUPABASE_SETUP_SQL = `-- ==========================================================
 -- Punjabi Bistro & Bakery, Dharamkot
--- Supabase Database Schema & Storage Configuration
+-- Supabase Database Schema, Storage & Google OAuth RLS Security
 -- ==========================================================
 
 -- 1. Orders Table
@@ -762,66 +958,177 @@ CREATE TABLE IF NOT EXISTS public.products (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Enable Row Level Security (RLS)
+-- 6. Authorized Admin Users Allowlist Table
+CREATE TABLE IF NOT EXISTS public.admin_users (
+  id UUID PRIMARY KEY,
+  email TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'admin',
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 7. Security Definer Helper Function for RLS
+-- Checks if a given user UUID is an active authorized admin
+CREATE OR REPLACE FUNCTION public.is_admin(user_uuid UUID)
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.admin_users
+    WHERE id = user_uuid AND is_active = TRUE
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Enable Row Level Security (RLS) on all tables
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.custom_cake_enquiries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customer_issues ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.admin_users ENABLE ROW LEVEL SECURITY;
 
--- Allow public read & write access for the Bistro store application
-DROP POLICY IF EXISTS "Allow public select on orders" ON public.orders;
-CREATE POLICY "Allow public select on orders" ON public.orders FOR SELECT USING (true);
-DROP POLICY IF EXISTS "Allow public insert on orders" ON public.orders;
-CREATE POLICY "Allow public insert on orders" ON public.orders FOR INSERT WITH CHECK (true);
-DROP POLICY IF EXISTS "Allow public update on orders" ON public.orders;
-CREATE POLICY "Allow public update on orders" ON public.orders FOR UPDATE USING (true);
+-- ==========================================================
+-- RLS Policies: Storefront Public Access vs Admin Authorizations
+-- ==========================================================
 
-DROP POLICY IF EXISTS "Allow public select on custom_cake_enquiries" ON public.custom_cake_enquiries;
-CREATE POLICY "Allow public select on custom_cake_enquiries" ON public.custom_cake_enquiries FOR SELECT USING (true);
-DROP POLICY IF EXISTS "Allow public insert on custom_cake_enquiries" ON public.custom_cake_enquiries;
-CREATE POLICY "Allow public insert on custom_cake_enquiries" ON public.custom_cake_enquiries FOR INSERT WITH CHECK (true);
-DROP POLICY IF EXISTS "Allow public update on custom_cake_enquiries" ON public.custom_cake_enquiries;
-CREATE POLICY "Allow public update on custom_cake_enquiries" ON public.custom_cake_enquiries FOR UPDATE USING (true);
+-- Admin Users Table RLS:
+-- Authenticated users can check their own admin status
+DROP POLICY IF EXISTS "Allow users to read their own admin record" ON public.admin_users;
+CREATE POLICY "Allow users to read their own admin record" ON public.admin_users
+  FOR SELECT TO authenticated
+  USING (auth.uid() = id);
 
-DROP POLICY IF EXISTS "Allow public select on reviews" ON public.reviews;
-CREATE POLICY "Allow public select on reviews" ON public.reviews FOR SELECT USING (true);
-DROP POLICY IF EXISTS "Allow public insert on reviews" ON public.reviews;
-CREATE POLICY "Allow public insert on reviews" ON public.reviews FOR INSERT WITH CHECK (true);
+-- Authorized admins can view all admin users
+DROP POLICY IF EXISTS "Allow active admins to view all admin users" ON public.admin_users;
+CREATE POLICY "Allow active admins to view all admin users" ON public.admin_users
+  FOR SELECT TO authenticated
+  USING (public.is_admin(auth.uid()));
 
-DROP POLICY IF EXISTS "Allow public select on customer_issues" ON public.customer_issues;
-CREATE POLICY "Allow public select on customer_issues" ON public.customer_issues FOR SELECT USING (true);
-DROP POLICY IF EXISTS "Allow public insert on customer_issues" ON public.customer_issues;
-CREATE POLICY "Allow public insert on customer_issues" ON public.customer_issues FOR INSERT WITH CHECK (true);
-DROP POLICY IF EXISTS "Allow public update on customer_issues" ON public.customer_issues;
-CREATE POLICY "Allow public update on customer_issues" ON public.customer_issues FOR UPDATE USING (true);
+-- Authorized admins can insert, update, or delete admin users
+DROP POLICY IF EXISTS "Allow active admins to manage admin users" ON public.admin_users;
+CREATE POLICY "Allow active admins to manage admin users" ON public.admin_users
+  FOR ALL TO authenticated
+  USING (public.is_admin(auth.uid()))
+  WITH CHECK (public.is_admin(auth.uid()));
 
+-- Products Table RLS:
+-- Public can view menu products
 DROP POLICY IF EXISTS "Allow public select on products" ON public.products;
-CREATE POLICY "Allow public select on products" ON public.products FOR SELECT USING (true);
-DROP POLICY IF EXISTS "Allow public insert on products" ON public.products;
-CREATE POLICY "Allow public insert on products" ON public.products FOR INSERT WITH CHECK (true);
-DROP POLICY IF EXISTS "Allow public update on products" ON public.products;
-CREATE POLICY "Allow public update on products" ON public.products FOR UPDATE USING (true);
-DROP POLICY IF EXISTS "Allow public delete on products" ON public.products;
-CREATE POLICY "Allow public delete on products" ON public.products FOR DELETE USING (true);
+CREATE POLICY "Allow public select on products" ON public.products
+  FOR SELECT USING (true);
 
--- 6. Supabase Storage: Product Images Bucket Setup
+-- Only authorized admins can insert, update, or delete products
+DROP POLICY IF EXISTS "Allow authorized admins to insert products" ON public.products;
+CREATE POLICY "Allow authorized admins to insert products" ON public.products
+  FOR INSERT TO authenticated
+  WITH CHECK (public.is_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "Allow authorized admins to update products" ON public.products;
+CREATE POLICY "Allow authorized admins to update products" ON public.products
+  FOR UPDATE TO authenticated
+  USING (public.is_admin(auth.uid()))
+  WITH CHECK (public.is_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "Allow authorized admins to delete products" ON public.products;
+CREATE POLICY "Allow authorized admins to delete products" ON public.products
+  FOR DELETE TO authenticated
+  USING (public.is_admin(auth.uid()));
+
+-- Orders Table RLS:
+-- Customers can view their orders and place orders
+DROP POLICY IF EXISTS "Allow public select on orders" ON public.orders;
+CREATE POLICY "Allow public select on orders" ON public.orders
+  FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Allow public insert on orders" ON public.orders;
+CREATE POLICY "Allow public insert on orders" ON public.orders
+  FOR INSERT WITH CHECK (true);
+
+-- Only authorized admins can update orders (order status, kitchen delay, cancel, dispatch)
+DROP POLICY IF EXISTS "Allow authorized admins to update orders" ON public.orders;
+CREATE POLICY "Allow authorized admins to update orders" ON public.orders
+  FOR UPDATE TO authenticated
+  USING (public.is_admin(auth.uid()))
+  WITH CHECK (public.is_admin(auth.uid()));
+
+-- Custom Cake Enquiries RLS:
+-- Customers can view and submit cake enquiries
+DROP POLICY IF EXISTS "Allow public select on custom_cake_enquiries" ON public.custom_cake_enquiries;
+CREATE POLICY "Allow public select on custom_cake_enquiries" ON public.custom_cake_enquiries
+  FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Allow public insert on custom_cake_enquiries" ON public.custom_cake_enquiries;
+CREATE POLICY "Allow public insert on custom_cake_enquiries" ON public.custom_cake_enquiries
+  FOR INSERT WITH CHECK (true);
+
+-- Only authorized admins can update cake quotes and status
+DROP POLICY IF EXISTS "Allow authorized admins to update custom_cake_enquiries" ON public.custom_cake_enquiries;
+CREATE POLICY "Allow authorized admins to update custom_cake_enquiries" ON public.custom_cake_enquiries
+  FOR UPDATE TO authenticated
+  USING (public.is_admin(auth.uid()))
+  WITH CHECK (public.is_admin(auth.uid()));
+
+-- Reviews Table RLS:
+-- Public can view reviews and submit feedback
+DROP POLICY IF EXISTS "Allow public select on reviews" ON public.reviews;
+CREATE POLICY "Allow public select on reviews" ON public.reviews
+  FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Allow public insert on reviews" ON public.reviews;
+CREATE POLICY "Allow public insert on reviews" ON public.reviews
+  FOR INSERT WITH CHECK (true);
+
+-- Only authorized admins can update reviews (owner reply)
+DROP POLICY IF EXISTS "Allow authorized admins to update reviews" ON public.reviews;
+CREATE POLICY "Allow authorized admins to update reviews" ON public.reviews
+  FOR UPDATE TO authenticated
+  USING (public.is_admin(auth.uid()))
+  WITH CHECK (public.is_admin(auth.uid()));
+
+-- Customer Issues Table RLS:
+-- Customers can submit reports and check status
+DROP POLICY IF EXISTS "Allow public select on customer_issues" ON public.customer_issues;
+CREATE POLICY "Allow public select on customer_issues" ON public.customer_issues
+  FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Allow public insert on customer_issues" ON public.customer_issues;
+CREATE POLICY "Allow public insert on customer_issues" ON public.customer_issues
+  FOR INSERT WITH CHECK (true);
+
+-- Only authorized admins can resolve customer issues
+DROP POLICY IF EXISTS "Allow authorized admins to update customer_issues" ON public.customer_issues;
+CREATE POLICY "Allow authorized admins to update customer_issues" ON public.customer_issues
+  FOR UPDATE TO authenticated
+  USING (public.is_admin(auth.uid()))
+  WITH CHECK (public.is_admin(auth.uid()));
+
+-- 8. Supabase Storage: Product Images Bucket Setup
 INSERT INTO storage.buckets (id, name, public) 
 VALUES ('product-images', 'product-images', true)
 ON CONFLICT (id) DO UPDATE SET public = true;
 
--- Storage Policies for Public Reading and Admin Uploading
+-- Storage Policies:
+-- Public can read images for the storefront
 DROP POLICY IF EXISTS "Public Access product-images" ON storage.objects;
-CREATE POLICY "Public Access product-images" ON storage.objects FOR SELECT USING (bucket_id = 'product-images');
+CREATE POLICY "Public Access product-images" ON storage.objects
+  FOR SELECT USING (bucket_id = 'product-images');
 
-DROP POLICY IF EXISTS "Public Upload product-images" ON storage.objects;
-CREATE POLICY "Public Upload product-images" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'product-images');
+-- Only authenticated authorized admins can upload, modify, or delete product images
+DROP POLICY IF EXISTS "Admin Upload product-images" ON storage.objects;
+CREATE POLICY "Admin Upload product-images" ON storage.objects
+  FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'product-images' AND public.is_admin(auth.uid()));
 
-DROP POLICY IF EXISTS "Public Update product-images" ON storage.objects;
-CREATE POLICY "Public Update product-images" ON storage.objects FOR UPDATE USING (bucket_id = 'product-images');
+DROP POLICY IF EXISTS "Admin Update product-images" ON storage.objects;
+CREATE POLICY "Admin Update product-images" ON storage.objects
+  FOR UPDATE TO authenticated
+  USING (bucket_id = 'product-images' AND public.is_admin(auth.uid()))
+  WITH CHECK (bucket_id = 'product-images' AND public.is_admin(auth.uid()));
 
-DROP POLICY IF EXISTS "Public Delete product-images" ON storage.objects;
-CREATE POLICY "Public Delete product-images" ON storage.objects FOR DELETE USING (bucket_id = 'product-images');
+DROP POLICY IF EXISTS "Admin Delete product-images" ON storage.objects;
+CREATE POLICY "Admin Delete product-images" ON storage.objects
+  FOR DELETE TO authenticated
+  USING (bucket_id = 'product-images' AND public.is_admin(auth.uid()));
 
 -- Enable Realtime publication for live order and cake updates
 ALTER PUBLICATION supabase_realtime ADD TABLE public.orders;
