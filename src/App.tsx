@@ -30,7 +30,11 @@ export default function App() {
             <Route path="/" element={<StorefrontPage />} />
             <Route path="/admin" element={<AdminPage />} />
             <Route path="/orders" element={<OrderTrackingPage />} />
+            <Route path="/orders/:token" element={<OrderTrackingPage />} />
             <Route path="/tracking" element={<OrderTrackingPage />} />
+            <Route path="/tracking/:token" element={<OrderTrackingPage />} />
+            <Route path="/track" element={<OrderTrackingPage />} />
+            <Route path="/track/:token" element={<OrderTrackingPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>

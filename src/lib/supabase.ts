@@ -114,8 +114,50 @@ export async function testSupabaseConnection(): Promise<ConnectionStatus> {
 }
 
 // -------------------------------------------------------------
-// Orders Cloud Synchronization
+// Orders Cloud Synchronization & Secure Tracking
 // -------------------------------------------------------------
+
+export function generateTrackingToken(): string {
+  if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
+    const arr = new Uint8Array(24);
+    window.crypto.getRandomValues(arr);
+    return Array.from(arr, (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  return Array.from({ length: 48 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+}
+
+export function mapRowToOrder(row: any): Order {
+  return {
+    id: row.id,
+    orderNumber: row.order_number,
+    trackingToken: row.tracking_token || '',
+    customerName: row.customer_name,
+    customerPhone: row.customer_phone,
+    orderType: row.order_type,
+    deliveryAddress: row.delivery_address || undefined,
+    landmark: row.landmark || undefined,
+    zoneId: row.zone_id || undefined,
+    tableNumber: row.table_number || undefined,
+    timeSlot: row.time_slot || 'asap',
+    scheduledDate: row.scheduled_date || new Date().toISOString().split('T')[0],
+    items: Array.isArray(row.items) ? row.items : [],
+    subtotal: Number(row.subtotal) || 0,
+    deliveryFee: Number(row.delivery_fee) || 0,
+    discount: Number(row.discount) || 0,
+    couponCode: row.coupon_code || undefined,
+    total: Number(row.total) || 0,
+    paymentMethod: row.payment_method || 'cod',
+    paymentStatus: row.payment_status || 'pending',
+    upiTxnId: row.upi_txn_id || undefined,
+    status: row.status as OrderStatus,
+    orderNotes: row.order_notes || undefined,
+    isNoContactDelivery: Boolean(row.is_no_contact_delivery),
+    createdAt: row.created_at,
+    estimatedDeliveryTime: row.estimated_delivery_time || undefined,
+    delayMinutes: row.delay_minutes ? Number(row.delay_minutes) : undefined,
+    delayMessage: row.delay_message || undefined,
+  };
+}
 
 export async function fetchOrdersFromCloud(): Promise<Order[] | null> {
   try {
@@ -125,40 +167,12 @@ export async function fetchOrdersFromCloud(): Promise<Order[] | null> {
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.warn('Supabase fetch orders:', error.message);
+      console.warn('Supabase fetch orders notice:', error.message);
       return null;
     }
     if (!data) return [];
 
-    return data.map((row) => ({
-      id: row.id,
-      orderNumber: row.order_number,
-      customerName: row.customer_name,
-      customerPhone: row.customer_phone,
-      orderType: row.order_type,
-      deliveryAddress: row.delivery_address || undefined,
-      landmark: row.landmark || undefined,
-      zoneId: row.zone_id || undefined,
-      tableNumber: row.table_number || undefined,
-      timeSlot: row.time_slot || 'asap',
-      scheduledDate: row.scheduled_date || new Date().toISOString().split('T')[0],
-      items: Array.isArray(row.items) ? row.items : [],
-      subtotal: Number(row.subtotal) || 0,
-      deliveryFee: Number(row.delivery_fee) || 0,
-      discount: Number(row.discount) || 0,
-      couponCode: row.coupon_code || undefined,
-      total: Number(row.total) || 0,
-      paymentMethod: row.payment_method || 'cod',
-      paymentStatus: row.payment_status || 'pending',
-      upiTxnId: row.upi_txn_id || undefined,
-      status: row.status as OrderStatus,
-      orderNotes: row.order_notes || undefined,
-      isNoContactDelivery: Boolean(row.is_no_contact_delivery),
-      createdAt: row.created_at,
-      estimatedDeliveryTime: row.estimated_delivery_time || undefined,
-      delayMinutes: row.delay_minutes ? Number(row.delay_minutes) : undefined,
-      delayMessage: row.delay_message || undefined,
-    }));
+    return data.map(mapRowToOrder);
   } catch (err) {
     console.warn('Supabase fetchOrders error:', err);
     return null;
@@ -167,9 +181,11 @@ export async function fetchOrdersFromCloud(): Promise<Order[] | null> {
 
 export async function saveOrderToCloud(order: Order): Promise<boolean> {
   try {
+    const token = order.trackingToken || generateTrackingToken();
     const payload = {
       id: order.id,
       order_number: order.orderNumber,
+      tracking_token: token,
       customer_name: order.customerName,
       customer_phone: order.customerPhone,
       order_type: order.orderType,
@@ -206,6 +222,172 @@ export async function saveOrderToCloud(order: Order): Promise<boolean> {
   } catch (err) {
     console.warn('Supabase saveOrder exception:', err);
     return false;
+  }
+}
+
+export async function fetchOrderByToken(token: string): Promise<Order | null> {
+  const cleanToken = token.trim().toLowerCase();
+  if (!cleanToken || cleanToken.length < 16) return null;
+
+  try {
+    // 1. Try secure RPC function (Security Definer)
+    const { data: rpcData, error: rpcError } = await supabase.rpc('get_order_by_tracking_token', {
+      p_token: cleanToken,
+    });
+
+    if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
+      return mapRowToOrder(rpcData[0]);
+    }
+
+    // 2. Direct PostgREST query fallback (if custom policy or table exposure allows)
+    const { data: directData, error: directError } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('tracking_token', cleanToken)
+      .maybeSingle();
+
+    if (!directError && directData) {
+      return mapRowToOrder(directData);
+    }
+
+    if (rpcError && directError) {
+      console.warn('Supabase fetchOrderByToken query note:', rpcError.message || directError.message);
+    }
+    return null;
+  } catch (err) {
+    console.warn('Supabase fetchOrderByToken exception:', err);
+    return null;
+  }
+}
+
+export async function fetchOrderByNumberAndPhone(
+  orderNumber: string,
+  phone: string
+): Promise<Order | null> {
+  let cleanNum = orderNumber.trim().toUpperCase();
+  if (!cleanNum.startsWith('PB-') && cleanNum.startsWith('PB')) {
+    cleanNum = 'PB-' + cleanNum.slice(2).trim();
+  } else if (!cleanNum.startsWith('PB-') && /^\d+$/.test(cleanNum)) {
+    cleanNum = 'PB-' + cleanNum;
+  }
+
+  const cleanPhone = phone.replace(/\D/g, '');
+  if (!cleanNum || cleanPhone.length < 7) return null;
+
+  try {
+    // 1. Try secure RPC function (verifies order number AND customer phone simultaneously)
+    const { data: rpcData, error: rpcError } = await supabase.rpc('get_order_by_number_and_phone', {
+      p_order_number: cleanNum,
+      p_phone: cleanPhone,
+    });
+
+    if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
+      return mapRowToOrder(rpcData[0]);
+    }
+
+    // 2. Direct query fallback
+    const { data: directData, error: directError } = await supabase
+      .from('orders')
+      .select('*')
+      .or(`order_number.eq.${cleanNum},id.eq.${cleanNum}`)
+      .maybeSingle();
+
+    if (!directError && directData) {
+      const dbPhone = String(directData.customer_phone || '').replace(/\D/g, '');
+      if (dbPhone.endsWith(cleanPhone) || cleanPhone.endsWith(dbPhone)) {
+        return mapRowToOrder(directData);
+      }
+    }
+
+    return null;
+  } catch (err) {
+    console.warn('Supabase fetchOrderByNumberAndPhone exception:', err);
+    return null;
+  }
+}
+
+export async function broadcastOrderStatus(
+  orderNumber: string,
+  trackingToken: string,
+  update: { status: OrderStatus; delayMinutes?: number; delayMessage?: string }
+): Promise<void> {
+  if (!trackingToken) return;
+  try {
+    const channelName = `order-track-${trackingToken}`;
+    const channel = supabase.channel(channelName);
+    channel.subscribe((subStatus) => {
+      if (subStatus === 'SUBSCRIBED') {
+        channel.send({
+          type: 'broadcast',
+          event: 'status_changed',
+          payload: {
+            orderNumber,
+            trackingToken,
+            ...update,
+            timestamp: new Date().toISOString(),
+          },
+        });
+        setTimeout(() => {
+          supabase.removeChannel(channel);
+        }, 3000);
+      }
+    });
+  } catch (err) {
+    console.warn('Supabase broadcastOrderStatus error:', err);
+  }
+}
+
+export function subscribeToOrderUpdates(
+  orderNumber: string,
+  trackingToken: string,
+  onUpdate: (update: { status?: OrderStatus; delayMinutes?: number; delayMessage?: string }) => void
+): () => void {
+  if (!trackingToken) return () => {};
+
+  try {
+    const channelName = `order-track-${trackingToken}`;
+    const channel = supabase.channel(channelName);
+
+    // Listen to fast broadcast events
+    channel.on('broadcast', { event: 'status_changed' }, (payload) => {
+      if (payload?.payload) {
+        onUpdate({
+          status: payload.payload.status,
+          delayMinutes: payload.payload.delayMinutes,
+          delayMessage: payload.payload.delayMessage,
+        });
+      }
+    });
+
+    // Also listen to postgres changes if allowed
+    channel.on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'orders',
+        filter: `tracking_token=eq.${trackingToken}`,
+      },
+      (payload) => {
+        if (payload?.new) {
+          const row = payload.new as any;
+          onUpdate({
+            status: row.status as OrderStatus,
+            delayMinutes: row.delay_minutes ? Number(row.delay_minutes) : undefined,
+            delayMessage: row.delay_message || undefined,
+          });
+        }
+      }
+    );
+
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  } catch (err) {
+    console.warn('subscribeToOrderUpdates exception:', err);
+    return () => {};
   }
 }
 
@@ -858,6 +1040,7 @@ export const SUPABASE_SETUP_SQL = `-- ==========================================
 CREATE TABLE IF NOT EXISTS public.orders (
   id TEXT PRIMARY KEY,
   order_number TEXT UNIQUE NOT NULL,
+  tracking_token TEXT UNIQUE NOT NULL DEFAULT md5(random()::text || clock_timestamp()::text),
   customer_name TEXT NOT NULL,
   customer_phone TEXT NOT NULL,
   order_type TEXT NOT NULL DEFAULT 'delivery',
@@ -884,6 +1067,14 @@ CREATE TABLE IF NOT EXISTS public.orders (
   delay_minutes INTEGER,
   delay_message TEXT
 );
+
+-- Schema Migration: Add tracking_token column if missing and create indexes
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS tracking_token TEXT;
+UPDATE public.orders SET tracking_token = md5(random()::text || id || clock_timestamp()::text) WHERE tracking_token IS NULL;
+ALTER TABLE public.orders ALTER COLUMN tracking_token SET DEFAULT md5(random()::text || clock_timestamp()::text);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_tracking_token ON public.orders (tracking_token);
+CREATE INDEX IF NOT EXISTS idx_orders_order_number ON public.orders (order_number);
+CREATE INDEX IF NOT EXISTS idx_orders_customer_phone ON public.orders (customer_phone);
 
 -- 2. Custom Cake Enquiries Table
 CREATE TABLE IF NOT EXISTS public.custom_cake_enquiries (
@@ -979,6 +1170,174 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- 7b. Secure Order Lookup by Cryptographic Tracking Token
+-- Allows customers to query only their own order using their secret token
+CREATE OR REPLACE FUNCTION public.get_order_by_tracking_token(p_token TEXT)
+RETURNS TABLE (
+  id TEXT,
+  order_number TEXT,
+  tracking_token TEXT,
+  customer_name TEXT,
+  customer_phone TEXT,
+  order_type TEXT,
+  delivery_address TEXT,
+  landmark TEXT,
+  zone_id TEXT,
+  table_number TEXT,
+  time_slot TEXT,
+  scheduled_date TEXT,
+  items JSONB,
+  subtotal NUMERIC,
+  delivery_fee NUMERIC,
+  discount NUMERIC,
+  coupon_code TEXT,
+  total NUMERIC,
+  payment_method TEXT,
+  payment_status TEXT,
+  upi_txn_id TEXT,
+  status TEXT,
+  order_notes TEXT,
+  is_no_contact_delivery BOOLEAN,
+  created_at TIMESTAMPTZ,
+  estimated_delivery_time TEXT,
+  delay_minutes INTEGER,
+  delay_message TEXT
+)
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF p_token IS NULL OR length(trim(p_token)) < 16 THEN
+    RETURN;
+  END IF;
+
+  RETURN QUERY
+  SELECT
+    o.id,
+    o.order_number,
+    o.tracking_token,
+    o.customer_name,
+    o.customer_phone,
+    o.order_type,
+    o.delivery_address,
+    o.landmark,
+    o.zone_id,
+    o.table_number,
+    o.time_slot,
+    o.scheduled_date,
+    o.items,
+    o.subtotal,
+    o.delivery_fee,
+    o.discount,
+    o.coupon_code,
+    o.total,
+    o.payment_method,
+    o.payment_status,
+    o.upi_txn_id,
+    o.status,
+    o.order_notes,
+    o.is_no_contact_delivery,
+    o.created_at,
+    o.estimated_delivery_time,
+    o.delay_minutes,
+    o.delay_message
+  FROM public.orders o
+  WHERE lower(trim(o.tracking_token)) = lower(trim(p_token))
+  LIMIT 1;
+END;
+$$ LANGUAGE plpgsql;
+
+GRANT EXECUTE ON FUNCTION public.get_order_by_tracking_token(TEXT) TO anon, authenticated;
+
+-- 7c. Secure Order Lookup by Order Number AND Customer Phone Verification
+-- Prevents random order snooping while allowing customers without link to verify ownership
+CREATE OR REPLACE FUNCTION public.get_order_by_number_and_phone(p_order_number TEXT, p_phone TEXT)
+RETURNS TABLE (
+  id TEXT,
+  order_number TEXT,
+  tracking_token TEXT,
+  customer_name TEXT,
+  customer_phone TEXT,
+  order_type TEXT,
+  delivery_address TEXT,
+  landmark TEXT,
+  zone_id TEXT,
+  table_number TEXT,
+  time_slot TEXT,
+  scheduled_date TEXT,
+  items JSONB,
+  subtotal NUMERIC,
+  delivery_fee NUMERIC,
+  discount NUMERIC,
+  coupon_code TEXT,
+  total NUMERIC,
+  payment_method TEXT,
+  payment_status TEXT,
+  upi_txn_id TEXT,
+  status TEXT,
+  order_notes TEXT,
+  is_no_contact_delivery BOOLEAN,
+  created_at TIMESTAMPTZ,
+  estimated_delivery_time TEXT,
+  delay_minutes INTEGER,
+  delay_message TEXT
+)
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_clean_num TEXT;
+  v_clean_phone TEXT;
+BEGIN
+  v_clean_num := upper(trim(p_order_number));
+  IF NOT v_clean_num LIKE 'PB-%' AND v_clean_num LIKE 'PB%' THEN
+    v_clean_num := 'PB-' || trim(substring(v_clean_num FROM 3));
+  END IF;
+  v_clean_phone := right(regexp_replace(p_phone, '\D', '', 'g'), 10);
+
+  IF v_clean_num = '' OR length(v_clean_phone) < 7 THEN
+    RETURN;
+  END IF;
+
+  RETURN QUERY
+  SELECT
+    o.id,
+    o.order_number,
+    o.tracking_token,
+    o.customer_name,
+    o.customer_phone,
+    o.order_type,
+    o.delivery_address,
+    o.landmark,
+    o.zone_id,
+    o.table_number,
+    o.time_slot,
+    o.scheduled_date,
+    o.items,
+    o.subtotal,
+    o.delivery_fee,
+    o.discount,
+    o.coupon_code,
+    o.total,
+    o.payment_method,
+    o.payment_status,
+    o.upi_txn_id,
+    o.status,
+    o.order_notes,
+    o.is_no_contact_delivery,
+    o.created_at,
+    o.estimated_delivery_time,
+    o.delay_minutes,
+    o.delay_message
+  FROM public.orders o
+  WHERE (upper(trim(o.order_number)) = v_clean_num OR upper(trim(o.id)) = v_clean_num)
+    AND right(regexp_replace(o.customer_phone, '\D', '', 'g'), 10) = v_clean_phone
+  LIMIT 1;
+END;
+$$ LANGUAGE plpgsql;
+
+GRANT EXECUTE ON FUNCTION public.get_order_by_number_and_phone(TEXT, TEXT) TO anon, authenticated;
+
 -- Enable Row Level Security (RLS) on all tables
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.custom_cake_enquiries ENABLE ROW LEVEL SECURITY;
@@ -1035,14 +1394,18 @@ CREATE POLICY "Allow authorized admins to delete products" ON public.products
   USING (public.is_admin(auth.uid()));
 
 -- Orders Table RLS:
--- Customers can view their orders and place orders
+-- Anyone can place an order
 DROP POLICY IF EXISTS "Allow public select on orders" ON public.orders;
-CREATE POLICY "Allow public select on orders" ON public.orders
-  FOR SELECT USING (true);
-
 DROP POLICY IF EXISTS "Allow public insert on orders" ON public.orders;
 CREATE POLICY "Allow public insert on orders" ON public.orders
-  FOR INSERT WITH CHECK (true);
+  FOR INSERT TO public
+  WITH CHECK (true);
+
+-- Only authorized admins can select all orders (customers query via get_order_by_tracking_token RPC)
+DROP POLICY IF EXISTS "Allow active admins to select orders" ON public.orders;
+CREATE POLICY "Allow active admins to select orders" ON public.orders
+  FOR SELECT TO authenticated
+  USING (public.is_admin(auth.uid()));
 
 -- Only authorized admins can update orders (order status, kitchen delay, cancel, dispatch)
 DROP POLICY IF EXISTS "Allow authorized admins to update orders" ON public.orders;
@@ -1051,15 +1414,24 @@ CREATE POLICY "Allow authorized admins to update orders" ON public.orders
   USING (public.is_admin(auth.uid()))
   WITH CHECK (public.is_admin(auth.uid()));
 
+-- Only authorized admins can delete orders
+DROP POLICY IF EXISTS "Allow authorized admins to delete orders" ON public.orders;
+CREATE POLICY "Allow authorized admins to delete orders" ON public.orders
+  FOR DELETE TO authenticated
+  USING (public.is_admin(auth.uid()));
+
 -- Custom Cake Enquiries RLS:
--- Customers can view and submit cake enquiries
+-- Anyone can submit cake enquiries
 DROP POLICY IF EXISTS "Allow public select on custom_cake_enquiries" ON public.custom_cake_enquiries;
-CREATE POLICY "Allow public select on custom_cake_enquiries" ON public.custom_cake_enquiries
-  FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow active admins to select custom_cake_enquiries" ON public.custom_cake_enquiries;
+CREATE POLICY "Allow active admins to select custom_cake_enquiries" ON public.custom_cake_enquiries
+  FOR SELECT TO authenticated
+  USING (public.is_admin(auth.uid()));
 
 DROP POLICY IF EXISTS "Allow public insert on custom_cake_enquiries" ON public.custom_cake_enquiries;
 CREATE POLICY "Allow public insert on custom_cake_enquiries" ON public.custom_cake_enquiries
-  FOR INSERT WITH CHECK (true);
+  FOR INSERT TO public
+  WITH CHECK (true);
 
 -- Only authorized admins can update cake quotes and status
 DROP POLICY IF EXISTS "Allow authorized admins to update custom_cake_enquiries" ON public.custom_cake_enquiries;

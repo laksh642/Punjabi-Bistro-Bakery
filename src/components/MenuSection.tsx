@@ -23,9 +23,8 @@ interface MenuSectionProps {
 }
 
 export const MenuSection: React.FC<MenuSectionProps> = ({ selectedMood, onClearMood }) => {
-  const { products, categories, businessSettings } = useStore();
+  const { products, categories, businessSettings, selectedCategory, setSelectedCategory } = useStore();
 
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedProductForModal, setSelectedProductForModal] = useState<Product | null>(null);
 

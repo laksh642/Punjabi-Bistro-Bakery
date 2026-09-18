@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { motion } from 'motion/react';
 import {
   Phone,
   MessageCircle,
@@ -14,6 +15,9 @@ import {
   Cake,
   QrCode,
   FileText,
+  Bike,
+  Store,
+  Utensils,
 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { PunjabiBistroLogo } from './PunjabiBistroLogo';
@@ -29,6 +33,8 @@ export const Navbar: React.FC = () => {
     setIsMenuOnlyMode,
     isStoreOpen,
     businessSettings,
+    fulfillmentMode,
+    setFulfillmentMode,
   } = useStore();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -52,6 +58,43 @@ export const Navbar: React.FC = () => {
                 <MapPin className="w-3.5 h-3.5" />
                 Near Udham Singh Chowk, Dharamkot
               </span>
+              {/* Service Mode Toggle (Delivery, Pick-up, Dine-in) */}
+              <div className="hidden sm:flex items-center bg-emerald-950/60 p-0.5 rounded-lg border border-emerald-700/60 text-[11px] font-semibold">
+                <button
+                  onClick={() => setFulfillmentMode('delivery')}
+                  className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
+                    fulfillmentMode === 'delivery'
+                      ? 'bg-emerald-500 text-emerald-950 font-bold shadow-2xs'
+                      : 'text-emerald-200 hover:text-white'
+                  }`}
+                >
+                  <Bike className="w-3 h-3" />
+                  <span>Delivery</span>
+                </button>
+                <button
+                  onClick={() => setFulfillmentMode('pickup')}
+                  className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
+                    fulfillmentMode === 'pickup'
+                      ? 'bg-emerald-500 text-emerald-950 font-bold shadow-2xs'
+                      : 'text-emerald-200 hover:text-white'
+                  }`}
+                >
+                  <Store className="w-3 h-3" />
+                  <span>Pick-up</span>
+                </button>
+                <button
+                  onClick={() => setFulfillmentMode('dine_in')}
+                  className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
+                    fulfillmentMode === 'dine_in'
+                      ? 'bg-emerald-500 text-emerald-950 font-bold shadow-2xs'
+                      : 'text-emerald-200 hover:text-white'
+                  }`}
+                >
+                  <Utensils className="w-3 h-3" />
+                  <span>Dine-in</span>
+                </button>
+              </div>
+
               <span className="hidden md:inline-block text-emerald-600">|</span>
               <span className="hidden md:flex items-center gap-1.5 text-emerald-200">
                 <span
@@ -95,10 +138,14 @@ export const Navbar: React.FC = () => {
             {/* Logo / Brand Name */}
             <div className="flex items-center gap-3">
               <button
+                id="header-brand-button"
                 onClick={() => scrollToSection('hero-section')}
-                className="text-left group flex items-center gap-3 focus:outline-none"
+                className="text-left group flex items-center gap-3 focus:outline-none cursor-pointer"
               >
-                <PunjabiBistroLogo className="w-12 h-12 group-hover:scale-105 transition-transform" />
+                <PunjabiBistroLogo
+                  id="header-bistro-logo-img"
+                  className="w-12 h-12 sm:w-13 sm:h-13 group-hover:scale-105 transition-transform"
+                />
                 <div>
                   <h1 className="font-serif text-lg sm:text-xl font-bold tracking-tight text-[#0F2916] leading-tight group-hover:text-emerald-700 transition-colors">
                     Punjabi Bistro & Bakery
@@ -183,8 +230,9 @@ export const Navbar: React.FC = () => {
               </button>
 
               {/* Cart Button */}
-              <button
+              <motion.button
                 id="nav-cart-btn"
+                whileTap={{ scale: 0.95 }}
                 onClick={() => setIsCartOpen(true)}
                 className="relative flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-xl font-medium text-xs sm:text-sm shadow-xs hover:shadow transition-all cursor-pointer"
                 title="View Cart"
@@ -192,9 +240,15 @@ export const Navbar: React.FC = () => {
                 <ShoppingBag className="w-4 h-4" />
                 <span className="hidden sm:inline font-semibold">Cart</span>
                 {cartItemCount > 0 ? (
-                  <span className="bg-white text-emerald-800 font-bold text-xs px-1.5 py-0.2 rounded-full min-w-[18px] text-center shadow-xs">
+                  <motion.span
+                    key={cartItemCount}
+                    initial={{ scale: 0.6, opacity: 0.7 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ type: 'spring', stiffness: 500, damping: 20 }}
+                    className="bg-white text-emerald-800 font-bold text-xs px-1.5 py-0.2 rounded-full min-w-[18px] text-center shadow-xs"
+                  >
                     {cartItemCount}
-                  </span>
+                  </motion.span>
                 ) : (
                   <span className="text-xs text-emerald-200">0</span>
                 )}
@@ -203,7 +257,7 @@ export const Navbar: React.FC = () => {
                     ₹{cartSubtotal}
                   </span>
                 )}
-              </button>
+              </motion.button>
 
               {/* Mobile Menu Toggle Button */}
               <button

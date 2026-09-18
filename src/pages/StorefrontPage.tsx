@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Navbar } from '../components/Navbar';
-import { Hero } from '../components/Hero';
+import { FoodAnimationHero } from '../components/FoodAnimationHero';
+import { CategoryCircleNav } from '../components/CategoryCircleNav';
+import { TopOffersStrip } from '../components/TopOffersStrip';
 import { TrustStrip } from '../components/TrustStrip';
 import { MoodCravingSelector } from '../components/MoodCravingSelector';
 import { BestsellersSection } from '../components/BestsellersSection';
@@ -29,15 +31,31 @@ export const StorefrontPage: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1">
-        <Hero />
+        {/* Playful, Modern Food-Related Animations & Showcase (Pizza, Burger, Cakes) */}
+        <FoodAnimationHero />
+
         {/* Animated 100% Pure Eggless Moving Ticker Bar */}
         <EgglessMovingBar />
+
+        {/* Top Promotional Offers & Discount Code Ticker */}
+        <TopOffersStrip />
+
+        {/* Circular Visual Category Discovery */}
+        <CategoryCircleNav />
+
+        {/* Trust & Quality Highlights */}
         <TrustStrip />
+
+        {/* Mood & Craving Discovery */}
         <MoodCravingSelector
           selectedMood={selectedMood}
           onSelectMood={setSelectedMood}
         />
+
+        {/* Trending & Bestselling Dishes */}
         <BestsellersSection />
+
+        {/* Interactive Menu Section */}
         <MenuSection
           selectedMood={selectedMood}
           onClearMood={() => setSelectedMood(null)}

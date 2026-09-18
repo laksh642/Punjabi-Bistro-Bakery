@@ -68,9 +68,24 @@ export interface DeliveryZone {
   description: string;
 }
 
+export interface Coupon {
+  id: string;
+  code: string;
+  title: string;
+  subtitle: string;
+  discountType: 'percentage' | 'flat';
+  discountValue: number;
+  maxDiscount?: number;
+  minOrder: number;
+  isActive: boolean;
+  badge?: string;
+  expiryDate?: string;
+}
+
 export interface Order {
   id: string;
   orderNumber: string;
+  trackingToken: string;
   customerName: string;
   customerPhone: string;
   orderType: OrderType;

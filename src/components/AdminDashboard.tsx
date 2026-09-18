@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Clock,
   CheckCircle2,
@@ -29,17 +29,20 @@ import {
   ExternalLink,
   Lock,
   Shield,
+  Tag,
 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { Order, OrderStatus, Product, CustomCakeEnquiry, DeliveryZone } from '../types';
 import { PunjabiBistroLogo } from './PunjabiBistroLogo';
-import { SUPABASE_SETUP_SQL, SUPABASE_URL } from '../lib/supabase';
+import { SUPABASE_SETUP_SQL, SUPABASE_URL, supabase, isSupabaseConfigured } from '../lib/supabase';
 import { ProductImageManager } from './ProductImageManager';
 import { AdminUsersManager } from './AdminUsersManager';
+import { AdminCouponManager } from './AdminCouponManager';
 
 export const AdminDashboard: React.FC = () => {
   const {
     orders,
+    loadAdminOrders,
     updateOrderStatus,
     delayOrder,
     products,
@@ -63,8 +66,30 @@ export const AdminDashboard: React.FC = () => {
     syncWithCloud,
   } = useStore();
 
+  // Load cloud orders on Admin Dashboard mount and listen to changes
+  useEffect(() => {
+    loadAdminOrders();
+
+    if (isSupabaseConfigured) {
+      const channel = supabase
+        .channel('pb-admin-live-orders')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'orders' },
+          () => {
+            loadAdminOrders();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+  }, []);
+
   const [activeTab, setActiveTab] = useState<
-    'orders' | 'menu' | 'cakes' | 'zones' | 'issues' | 'settings' | 'analytics' | 'database'
+    'orders' | 'menu' | 'cakes' | 'coupons' | 'zones' | 'issues' | 'settings' | 'analytics' | 'database'
   >('orders');
 
   const [copiedSql, setCopiedSql] = useState(false);
@@ -307,6 +332,18 @@ export const AdminDashboard: React.FC = () => {
             >
               <Cake className="w-3.5 h-3.5" />
               <span>Cake Requests ({cakeEnquiries.length})</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('coupons')}
+              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
+                activeTab === 'coupons'
+                  ? 'bg-emerald-700 text-white font-bold'
+                  : 'text-emerald-200 hover:bg-emerald-900'
+              }`}
+            >
+              <Tag className="w-3.5 h-3.5" />
+              <span>Coupons & Offers</span>
             </button>
 
             <button
@@ -807,6 +844,9 @@ export const AdminDashboard: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* TAB: COUPONS & DISCOUNTS MANAGEMENT (OWNER CONTROLLED) */}
+        {activeTab === 'coupons' && <AdminCouponManager />}
 
         {/* TAB 4: DELIVERY ZONES CONFIGURATION */}
         {activeTab === 'zones' && (

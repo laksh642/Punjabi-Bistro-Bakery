@@ -11,6 +11,7 @@ import {
   DeliveryZone,
   ReviewItem,
   OrderStatus,
+  Coupon,
 } from '../types';
 import {
   INITIAL_PRODUCTS,
@@ -27,6 +28,10 @@ import {
   fetchOrdersFromCloud,
   saveOrderToCloud,
   updateOrderStatusInCloud,
+  fetchOrderByToken,
+  fetchOrderByNumberAndPhone,
+  broadcastOrderStatus,
+  generateTrackingToken,
   fetchCakeEnquiriesFromCloud,
   saveCakeEnquiryToCloud,
   updateCakeEnquiryInCloud,
@@ -42,23 +47,74 @@ import {
   isSupabaseConfigured,
 } from '../lib/supabase';
 
-interface CouponState {
-  code: string;
-  discountPercentage: number;
-  maxDiscount: number;
-  minOrder: number;
-}
-
-const VALID_COUPONS: Record<string, CouponState> = {
-  WELCOME10: { code: 'WELCOME10', discountPercentage: 10, maxDiscount: 50, minOrder: 199 },
-  BISTRO50: { code: 'BISTRO50', discountPercentage: 15, maxDiscount: 75, minOrder: 399 },
-  CAKE100: { code: 'CAKE100', discountPercentage: 12, maxDiscount: 100, minOrder: 500 },
-};
+export const DEFAULT_COUPONS: Coupon[] = [
+  {
+    id: 'coupon-1',
+    code: 'BISTRO100',
+    title: '₹100 FLAT OFF',
+    subtitle: 'On orders above ₹499 • Freshly prepared pizzas, burgers & bakery items',
+    discountType: 'flat',
+    discountValue: 100,
+    minOrder: 499,
+    isActive: true,
+    badge: 'Trending Deal',
+  },
+  {
+    id: 'coupon-2',
+    code: 'BISTRO50',
+    title: '15% OFF (Up to ₹75)',
+    subtitle: 'On orders above ₹399 • Authentic fresh taste in Dharamkot',
+    discountType: 'percentage',
+    discountValue: 15,
+    maxDiscount: 75,
+    minOrder: 399,
+    isActive: true,
+    badge: 'Popular',
+  },
+  {
+    id: 'coupon-3',
+    code: 'WELCOME10',
+    title: '10% FIRST ORDER OFF',
+    subtitle: 'On minimum order of ₹199 • Fast takeaway & delivery',
+    discountType: 'percentage',
+    discountValue: 10,
+    maxDiscount: 50,
+    minOrder: 199,
+    isActive: true,
+    badge: 'New Customer',
+  },
+  {
+    id: 'coupon-4',
+    code: 'CAKE100',
+    title: '₹100 OFF ON CAKES',
+    subtitle: '100% Pure Eggless 1Kg+ Cakes • With candles & cutting knife',
+    discountType: 'flat',
+    discountValue: 100,
+    minOrder: 500,
+    isActive: true,
+    badge: 'Bakery Special',
+  },
+  {
+    id: 'coupon-5',
+    code: 'FREEDEL',
+    title: '₹40 OFF DELIVERY',
+    subtitle: 'On orders above ₹299 • Safe & fast local delivery in Dharamkot',
+    discountType: 'flat',
+    discountValue: 40,
+    minOrder: 299,
+    isActive: true,
+    badge: 'Free Delivery',
+  },
+];
 
 interface StoreContextType {
   // Products
   products: Product[];
   categories: typeof INITIAL_CATEGORIES;
+  selectedCategory: string;
+  setSelectedCategory: (catId: string) => void;
+  fulfillmentMode: 'delivery' | 'pickup' | 'dine_in';
+  setFulfillmentMode: (mode: 'delivery' | 'pickup' | 'dine_in') => void;
   updateProduct: (product: Product) => void;
   toggleProductAvailability: (productId: string) => void;
   addProduct: (product: Omit<Product, 'id'>) => void;
@@ -85,16 +141,29 @@ interface StoreContextType {
   updateBusinessSettings: (settings: BusinessSettings) => void;
   isStoreOpen: boolean;
 
-  // Coupons
-  appliedCoupon: CouponState | null;
+  // Dynamic Coupons Management (Owner-Controlled)
+  coupons: Coupon[];
+  appliedCoupon: Coupon | null;
   couponError: string | null;
   applyCoupon: (code: string) => boolean;
   removeCoupon: () => void;
+  addCoupon: (coupon: Omit<Coupon, 'id'>) => void;
+  updateCoupon: (coupon: Coupon) => void;
+  deleteCoupon: (id: string) => void;
+  toggleCouponActive: (id: string) => void;
 
   // Orders
   orders: Order[];
   currentOrder: Order | null;
-  placeOrder: (orderData: Omit<Order, 'id' | 'orderNumber' | 'createdAt' | 'status'>) => Order;
+  customerOrders: Order[];
+  trackingOrderNumber: string;
+  setTrackingOrderNumber: (val: string) => void;
+  trackingToken: string;
+  setTrackingToken: (val: string) => void;
+  getCustomerToken: (orderNumber: string) => string | undefined;
+  saveCustomerToken: (orderNumber: string, token: string) => void;
+  loadAdminOrders: () => Promise<Order[]>;
+  placeOrder: (orderData: Omit<Order, 'id' | 'orderNumber' | 'createdAt' | 'status' | 'trackingToken'>) => Order;
   updateOrderStatus: (orderId: string, status: OrderStatus) => void;
   delayOrder: (orderId: string, additionalMinutes: number, reason: string) => void;
   findOrder: (query: string) => Order | undefined;
@@ -129,8 +198,6 @@ interface StoreContextType {
   setIsCartOpen: (value: boolean) => void;
   isTrackingOpen: boolean;
   setIsTrackingOpen: (value: boolean) => void;
-  trackingOrderNumber: string;
-  setTrackingOrderNumber: (val: string) => void;
   isCakeStudioOpen: boolean;
   setIsCakeStudioOpen: (value: boolean) => void;
   isIssueModalOpen: boolean;
@@ -161,9 +228,34 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return saved ? JSON.parse(saved) : [];
   });
 
+  // Customer-placed orders strictly isolated on this device/browser
+  const [customerOrders, setCustomerOrders] = useState<Order[]>(() => {
+    try {
+      const saved = localStorage.getItem('pb_customer_orders');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Map of orderNumber -> trackingToken for instant lookup on this device
+  const [customerTokens, setCustomerTokens] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('pb_customer_tokens');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  // Admin orders (loaded strictly on admin demand or admin route)
   const [orders, setOrders] = useState<Order[]>(() => {
-    const saved = localStorage.getItem('pb_orders');
-    return saved ? JSON.parse(saved) : INITIAL_ORDERS;
+    try {
+      const saved = localStorage.getItem('pb_admin_orders');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
   });
 
   const [cakeEnquiries, setCakeEnquiries] = useState<CustomCakeEnquiry[]>(() => {
@@ -201,8 +293,34 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return saved ? JSON.parse(saved) : [];
   });
 
-  const [appliedCoupon, setAppliedCoupon] = useState<CouponState | null>(null);
+  // Dynamic Coupons State (Owner Controlled, Persisted)
+  const [coupons, setCoupons] = useState<Coupon[]>(() => {
+    try {
+      const saved = localStorage.getItem('pb_coupons');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.warn('Failed to parse saved coupons:', e);
+    }
+    return DEFAULT_COUPONS;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('pb_coupons', JSON.stringify(coupons));
+    } catch (e) {
+      console.warn('Failed to save coupons to localStorage:', e);
+    }
+  }, [coupons]);
+
+  const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
   const [couponError, setCouponError] = useState<string | null>(null);
+
+  // Category & Fulfillment Mode State
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [fulfillmentMode, setFulfillmentMode] = useState<'delivery' | 'pickup' | 'dine_in'>('delivery');
 
   // Supabase Cloud State
   const [supabaseStatus, setSupabaseStatus] = useState<ConnectionStatus | null>(null);
@@ -213,12 +331,79 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isAdminView, setIsAdminView] = useState<boolean>(false);
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
   const [isTrackingOpen, setIsTrackingOpen] = useState<boolean>(false);
-  const [trackingOrderNumber, setTrackingOrderNumber] = useState<string>('PB-4081');
+  const [trackingOrderNumber, setTrackingOrderNumber] = useState<string>(() => {
+    try {
+      const savedOrders = localStorage.getItem('pb_customer_orders');
+      if (savedOrders) {
+        const parsed = JSON.parse(savedOrders);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed[0].orderNumber || '';
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return '';
+  });
+  const [trackingToken, setTrackingToken] = useState<string>(() => {
+    try {
+      const savedOrders = localStorage.getItem('pb_customer_orders');
+      if (savedOrders) {
+        const parsed = JSON.parse(savedOrders);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed[0].trackingToken || '';
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return '';
+  });
   const [isCakeStudioOpen, setIsCakeStudioOpen] = useState<boolean>(false);
   const [isIssueModalOpen, setIsIssueModalOpen] = useState<boolean>(false);
   const [isMenuOnlyMode, setIsMenuOnlyMode] = useState<boolean>(false);
 
-  // Cloud Synchronization Function
+  // Helper to retrieve token for an order number placed on this device
+  const getCustomerToken = (orderNumber: string): string | undefined => {
+    const clean = orderNumber.trim().toUpperCase();
+    if (customerTokens[clean]) return customerTokens[clean];
+    const match = customerOrders.find((o) => o.orderNumber.toUpperCase() === clean);
+    return match?.trackingToken;
+  };
+
+  // Helper to persist token for an order number on this device
+  const saveCustomerToken = (orderNumber: string, token: string) => {
+    const clean = orderNumber.trim().toUpperCase();
+    setCustomerTokens((prev) => {
+      const next = { ...prev, [clean]: token };
+      localStorage.setItem('pb_customer_tokens', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  // Admin-only order loader (invoked exclusively from Admin portal or when authenticated)
+  const loadAdminOrders = async (): Promise<Order[]> => {
+    if (!isSupabaseConfigured) {
+      if (orders.length === 0) {
+        setOrders(INITIAL_ORDERS);
+        return INITIAL_ORDERS;
+      }
+      return orders;
+    }
+    try {
+      const cloudOrders = await fetchOrdersFromCloud();
+      if (cloudOrders && cloudOrders.length > 0) {
+        setOrders(cloudOrders);
+        localStorage.setItem('pb_admin_orders', JSON.stringify(cloudOrders));
+        return cloudOrders;
+      }
+    } catch (err) {
+      console.warn('loadAdminOrders error:', err);
+    }
+    return orders;
+  };
+
+  // Cloud Synchronization Function - storefront syncs products and public reviews only
   const syncWithCloud = async () => {
     if (!isSupabaseConfigured) return;
     setIsCloudSyncing(true);
@@ -227,37 +412,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setSupabaseStatus(status);
 
       if (status.connected) {
-        // 1. Sync orders
-        if (status.tablesStatus.orders) {
-          const cloudOrders = await fetchOrdersFromCloud();
-          if (cloudOrders && cloudOrders.length > 0) {
-            setOrders((prev) => {
-              const map = new Map<string, Order>();
-              prev.forEach((o) => map.set(o.id, o));
-              cloudOrders.forEach((o) => map.set(o.id, o));
-              return Array.from(map.values()).sort(
-                (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-              );
-            });
-          }
-        }
-
-        // 2. Sync cake enquiries
-        if (status.tablesStatus.cake_enquiries) {
-          const cloudEnquiries = await fetchCakeEnquiriesFromCloud();
-          if (cloudEnquiries && cloudEnquiries.length > 0) {
-            setCakeEnquiries((prev) => {
-              const map = new Map<string, CustomCakeEnquiry>();
-              prev.forEach((e) => map.set(e.id, e));
-              cloudEnquiries.forEach((e) => map.set(e.id, e));
-              return Array.from(map.values()).sort(
-                (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-              );
-            });
-          }
-        }
-
-        // 3. Sync customer reviews
+        // 1. Sync customer reviews (public)
         if (status.tablesStatus.reviews) {
           const cloudReviews = await fetchReviewsFromCloud();
           if (cloudReviews && cloudReviews.length > 0) {
@@ -270,7 +425,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
         }
 
-        // 4. Sync products from Supabase cloud
+        // 2. Sync products from Supabase cloud (public menu)
         if (status.tablesStatus.products) {
           const cloudProducts = await fetchProductsFromCloud();
           if (cloudProducts && cloudProducts.length > 0) {
@@ -290,133 +445,25 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-  // Initial cloud sync & Real-time Supabase listeners
+  // Initial cloud sync & Real-time public product listeners
   useEffect(() => {
+    // Clear legacy insecure pb_orders from non-admin browser cache
+    try {
+      const legacyOrders = localStorage.getItem('pb_orders');
+      if (legacyOrders && !localStorage.getItem('pb_admin_orders')) {
+        localStorage.removeItem('pb_orders');
+      }
+    } catch {
+      // ignore
+    }
+
     syncWithCloud();
 
     if (!isSupabaseConfigured) return;
 
+    // Public broadcast channel strictly for menu product updates
     const channel = supabase
-      .channel('pb-live-sync')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'orders' },
-        (payload) => {
-          if (payload.eventType === 'INSERT' && payload.new) {
-            const newRow = payload.new as any;
-            const newOrder: Order = {
-              id: newRow.id,
-              orderNumber: newRow.order_number,
-              customerName: newRow.customer_name,
-              customerPhone: newRow.customer_phone,
-              orderType: newRow.order_type,
-              deliveryAddress: newRow.delivery_address || undefined,
-              landmark: newRow.landmark || undefined,
-              zoneId: newRow.zone_id || undefined,
-              tableNumber: newRow.table_number || undefined,
-              timeSlot: newRow.time_slot || 'asap',
-              scheduledDate: newRow.scheduled_date || new Date().toISOString().split('T')[0],
-              items: Array.isArray(newRow.items) ? newRow.items : [],
-              subtotal: Number(newRow.subtotal) || 0,
-              deliveryFee: Number(newRow.delivery_fee) || 0,
-              discount: Number(newRow.discount) || 0,
-              couponCode: newRow.coupon_code || undefined,
-              total: Number(newRow.total) || 0,
-              paymentMethod: newRow.payment_method || 'cod',
-              paymentStatus: newRow.payment_status || 'pending',
-              upiTxnId: newRow.upi_txn_id || undefined,
-              status: newRow.status as OrderStatus,
-              orderNotes: newRow.order_notes || undefined,
-              isNoContactDelivery: Boolean(newRow.is_no_contact_delivery),
-              createdAt: newRow.created_at,
-              estimatedDeliveryTime: newRow.estimated_delivery_time || undefined,
-              delayMinutes: newRow.delay_minutes ? Number(newRow.delay_minutes) : undefined,
-              delayMessage: newRow.delay_message || undefined,
-            };
-            setOrders((prev) => {
-              if (prev.some((o) => o.id === newOrder.id)) return prev;
-              return [newOrder, ...prev];
-            });
-          } else if (payload.eventType === 'UPDATE' && payload.new) {
-            const updatedRow = payload.new as any;
-            setOrders((prev) =>
-              prev.map((o) =>
-                o.id === updatedRow.id || o.orderNumber === updatedRow.order_number
-                  ? {
-                      ...o,
-                      status: updatedRow.status as OrderStatus,
-                      delayMinutes: updatedRow.delay_minutes ? Number(updatedRow.delay_minutes) : o.delayMinutes,
-                      delayMessage: updatedRow.delay_message || o.delayMessage,
-                    }
-                  : o
-              )
-            );
-            setCurrentOrder((curr) => {
-              if (curr && (curr.id === updatedRow.id || curr.orderNumber === updatedRow.order_number)) {
-                return {
-                  ...curr,
-                  status: updatedRow.status as OrderStatus,
-                  delayMinutes: updatedRow.delay_minutes ? Number(updatedRow.delay_minutes) : curr.delayMinutes,
-                  delayMessage: updatedRow.delay_message || curr.delayMessage,
-                };
-              }
-              return curr;
-            });
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'custom_cake_enquiries' },
-        (payload) => {
-          if (payload.eventType === 'INSERT' && payload.new) {
-            const newRow = payload.new as any;
-            const newEnquiry: CustomCakeEnquiry = {
-              id: newRow.id,
-              enquiryNumber: newRow.enquiry_number,
-              customerName: newRow.customer_name,
-              customerPhone: newRow.customer_phone,
-              customerWhatsApp: newRow.customer_whatsapp || newRow.customer_phone,
-              occasion: newRow.occasion || 'Celebration',
-              eventDate: newRow.event_date,
-              preferredTime: newRow.preferred_time || 'Evening',
-              servings: newRow.servings || '10-15 Guests',
-              weightKg: Number(newRow.weight_kg) || 1,
-              flavour: newRow.flavour || 'Pineapple Cream',
-              shape: newRow.shape || 'Round',
-              themeDescription: newRow.theme_description || '',
-              colorPreference: newRow.color_preference || '',
-              messageOnCake: newRow.message_on_cake || '',
-              isEggless: newRow.is_eggless !== undefined ? Boolean(newRow.is_eggless) : true,
-              referenceImage: newRow.reference_image || undefined,
-              approximateBudget: newRow.approximate_budget ? Number(newRow.approximate_budget) : undefined,
-              additionalNotes: newRow.additional_notes || undefined,
-              status: newRow.status as CustomCakeEnquiry['status'],
-              quotationAmount: newRow.quotation_amount ? Number(newRow.quotation_amount) : undefined,
-              adminNotes: newRow.admin_notes || undefined,
-              createdAt: newRow.created_at,
-            };
-            setCakeEnquiries((prev) => {
-              if (prev.some((e) => e.id === newEnquiry.id)) return prev;
-              return [newEnquiry, ...prev];
-            });
-          } else if (payload.eventType === 'UPDATE' && payload.new) {
-            const updatedRow = payload.new as any;
-            setCakeEnquiries((prev) =>
-              prev.map((e) =>
-                e.id === updatedRow.id || e.enquiryNumber === updatedRow.enquiry_number
-                  ? {
-                      ...e,
-                      status: updatedRow.status as CustomCakeEnquiry['status'],
-                      quotationAmount: updatedRow.quotation_amount ? Number(updatedRow.quotation_amount) : e.quotationAmount,
-                      adminNotes: updatedRow.admin_notes || e.adminNotes,
-                    }
-                  : e
-              )
-            );
-          }
-        }
-      )
+      .channel('pb-storefront-sync')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'products' },
@@ -472,8 +519,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [cart]);
 
   useEffect(() => {
-    localStorage.setItem('pb_orders', JSON.stringify(orders));
-  }, [orders]);
+    localStorage.setItem('pb_customer_orders', JSON.stringify(customerOrders));
+  }, [customerOrders]);
+
+  useEffect(() => {
+    localStorage.setItem('pb_customer_tokens', JSON.stringify(customerTokens));
+  }, [customerTokens]);
+
+  useEffect(() => {
+    if (isAdminView) {
+      localStorage.setItem('pb_admin_orders', JSON.stringify(orders));
+    }
+  }, [orders, isAdminView]);
 
   useEffect(() => {
     localStorage.setItem('pb_cake_enquiries', JSON.stringify(cakeEnquiries));
@@ -604,16 +661,31 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setAppliedCoupon(null);
   };
 
-  // Coupons
+  // Coupons (Owner-Controlled Dynamic Rules)
   const applyCoupon = (code: string): boolean => {
     const cleanCode = code.trim().toUpperCase();
-    const coupon = VALID_COUPONS[cleanCode];
+    const coupon = coupons.find((c) => c.code.toUpperCase() === cleanCode);
     if (!coupon) {
-      setCouponError('Invalid coupon code. Try WELCOME10 or BISTRO50');
+      const activeCodes = coupons
+        .filter((c) => c.isActive)
+        .map((c) => c.code)
+        .slice(0, 3)
+        .join(' or ');
+      setCouponError(`Invalid coupon code. ${activeCodes ? `Try ${activeCodes}` : ''}`);
+      return false;
+    }
+    if (!coupon.isActive) {
+      setCouponError(`Coupon ${coupon.code} is currently inactive.`);
+      return false;
+    }
+    if (coupon.expiryDate && new Date(coupon.expiryDate).getTime() < new Date().setHours(0, 0, 0, 0)) {
+      setCouponError(`Coupon ${coupon.code} has expired.`);
       return false;
     }
     if (cartSubtotal < coupon.minOrder) {
-      setCouponError(`Minimum order of ₹${coupon.minOrder} required for ${coupon.code}`);
+      setCouponError(
+        `Minimum order of ₹${coupon.minOrder} required for ${coupon.code}. Add ₹${coupon.minOrder - cartSubtotal} more items!`
+      );
       return false;
     }
     setAppliedCoupon(coupon);
@@ -624,6 +696,52 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const removeCoupon = () => {
     setAppliedCoupon(null);
     setCouponError(null);
+  };
+
+  const addCoupon = (couponData: Omit<Coupon, 'id'>) => {
+    const newCoupon: Coupon = {
+      ...couponData,
+      id: `coupon-${Date.now()}`,
+      code: couponData.code.trim().toUpperCase(),
+    };
+    setCoupons((prev) => [newCoupon, ...prev]);
+  };
+
+  const updateCoupon = (updatedCoupon: Coupon) => {
+    const formatted: Coupon = {
+      ...updatedCoupon,
+      code: updatedCoupon.code.trim().toUpperCase(),
+    };
+    setCoupons((prev) => prev.map((c) => (c.id === formatted.id ? formatted : c)));
+    if (appliedCoupon?.id === formatted.id) {
+      if (!formatted.isActive || cartSubtotal < formatted.minOrder) {
+        setAppliedCoupon(null);
+      } else {
+        setAppliedCoupon(formatted);
+      }
+    }
+  };
+
+  const deleteCoupon = (id: string) => {
+    setCoupons((prev) => prev.filter((c) => c.id !== id));
+    if (appliedCoupon?.id === id) {
+      setAppliedCoupon(null);
+    }
+  };
+
+  const toggleCouponActive = (id: string) => {
+    setCoupons((prev) =>
+      prev.map((c) => {
+        if (c.id === id) {
+          const updated = { ...c, isActive: !c.isActive };
+          if (!updated.isActive && appliedCoupon?.id === id) {
+            setAppliedCoupon(null);
+          }
+          return updated;
+        }
+        return c;
+      })
+    );
   };
 
   // Product Admin Operations
@@ -678,21 +796,27 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Orders
   const placeOrder = (
-    orderData: Omit<Order, 'id' | 'orderNumber' | 'createdAt' | 'status'>
+    orderData: Omit<Order, 'id' | 'orderNumber' | 'createdAt' | 'status' | 'trackingToken'>
   ): Order => {
+    const trackingToken = generateTrackingToken();
     const randomNum = Math.floor(1000 + Math.random() * 9000);
     const orderNumber = `PB-${randomNum}`;
     const newOrder: Order = {
       ...orderData,
       id: `ord-${Date.now()}`,
       orderNumber,
+      trackingToken,
       status: 'new',
       createdAt: new Date().toISOString(),
     };
 
+    // Isolate customer's own order
+    setCustomerOrders((prev) => [newOrder, ...prev]);
+    saveCustomerToken(orderNumber, trackingToken);
     setOrders((prev) => [newOrder, ...prev]);
     setCurrentOrder(newOrder);
     setTrackingOrderNumber(orderNumber);
+    setTrackingToken(trackingToken);
     clearCart();
 
     // Asynchronously synchronize with Supabase Cloud
@@ -704,27 +828,49 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const updateOrderStatus = (orderId: string, status: OrderStatus) => {
+    let matchedToken: string | undefined;
+    let matchedNum: string | undefined;
+
     setOrders((prev) =>
       prev.map((ord) => {
         if (ord.id === orderId || ord.orderNumber === orderId) {
-          const updated = { ...ord, status };
-          if (currentOrder && (currentOrder.id === orderId || currentOrder.orderNumber === orderId)) {
-            setCurrentOrder(updated);
-          }
-          return updated;
+          matchedToken = ord.trackingToken;
+          matchedNum = ord.orderNumber;
+          return { ...ord, status };
         }
         return ord;
       })
     );
 
+    setCustomerOrders((prev) =>
+      prev.map((ord) => {
+        if (ord.id === orderId || ord.orderNumber === orderId) {
+          matchedToken = ord.trackingToken;
+          matchedNum = ord.orderNumber;
+          return { ...ord, status };
+        }
+        return ord;
+      })
+    );
+
+    if (currentOrder && (currentOrder.id === orderId || currentOrder.orderNumber === orderId)) {
+      setCurrentOrder((prev) => (prev ? { ...prev, status } : prev));
+    }
+
     updateOrderStatusInCloud(orderId, status).catch((err) => {
       console.warn('Supabase updateOrderStatus error:', err);
     });
+
+    if (matchedToken && matchedNum) {
+      broadcastOrderStatus(matchedNum, matchedToken, { status });
+    }
   };
 
   const delayOrder = (orderId: string, additionalMinutes: number, reason: string) => {
     let targetStatus: OrderStatus = 'preparing';
     let totalDelay = additionalMinutes;
+    let matchedToken: string | undefined;
+    let matchedNum: string | undefined;
     const currentMessage =
       reason || `Order delayed by ${additionalMinutes} mins due to fresh batch preparation.`;
 
@@ -733,29 +879,76 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (ord.id === orderId || ord.orderNumber === orderId) {
           totalDelay = (ord.delayMinutes || 0) + additionalMinutes;
           targetStatus = ord.status;
-          const updated = {
+          matchedToken = ord.trackingToken;
+          matchedNum = ord.orderNumber;
+          return {
             ...ord,
             delayMinutes: totalDelay,
             delayMessage: currentMessage,
           };
-          if (currentOrder && (currentOrder.id === orderId || currentOrder.orderNumber === orderId)) {
-            setCurrentOrder(updated);
-          }
-          return updated;
         }
         return ord;
       })
     );
 
+    setCustomerOrders((prev) =>
+      prev.map((ord) => {
+        if (ord.id === orderId || ord.orderNumber === orderId) {
+          totalDelay = (ord.delayMinutes || 0) + additionalMinutes;
+          targetStatus = ord.status;
+          matchedToken = ord.trackingToken;
+          matchedNum = ord.orderNumber;
+          return {
+            ...ord,
+            delayMinutes: totalDelay,
+            delayMessage: currentMessage,
+          };
+        }
+        return ord;
+      })
+    );
+
+    if (currentOrder && (currentOrder.id === orderId || currentOrder.orderNumber === orderId)) {
+      setCurrentOrder((prev) =>
+        prev
+          ? {
+              ...prev,
+              delayMinutes: totalDelay,
+              delayMessage: currentMessage,
+            }
+          : prev
+      );
+    }
+
     updateOrderStatusInCloud(orderId, targetStatus, totalDelay, currentMessage).catch((err) => {
       console.warn('Supabase delayOrder error:', err);
     });
+
+    if (matchedToken && matchedNum) {
+      broadcastOrderStatus(matchedNum, matchedToken, {
+        status: targetStatus,
+        delayMinutes: totalDelay,
+        delayMessage: currentMessage,
+      });
+    }
   };
 
   const findOrder = (query: string): Order | undefined => {
     const q = query.trim().toUpperCase();
-    return orders.find(
-      (o) => o.orderNumber.toUpperCase() === q || o.customerPhone.includes(q)
+    if (!q) return undefined;
+    return (
+      customerOrders.find(
+        (o) =>
+          o.orderNumber.toUpperCase() === q ||
+          o.id.toUpperCase() === q ||
+          (o.trackingToken && o.trackingToken.toLowerCase() === q.toLowerCase())
+      ) ||
+      orders.find(
+        (o) =>
+          o.orderNumber.toUpperCase() === q ||
+          o.id.toUpperCase() === q ||
+          (o.trackingToken && o.trackingToken.toLowerCase() === q.toLowerCase())
+      )
     );
   };
 
@@ -876,6 +1069,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       )
       .join('\n');
 
+    const trackingLink = order.trackingToken
+      ? `\n*Live Order Tracking:* ${window.location.origin}/track/${order.trackingToken}\n`
+      : '';
+
     const message = `*Punjabi Bistro & Bakery - Order #${order.orderNumber}*
 ------------------------------
 *Customer:* ${order.customerName}
@@ -898,7 +1095,7 @@ ${order.discount > 0 ? `*Discount (${order.couponCode || 'Promo'}):* -₹${order
 *Payment Method:* ${order.paymentMethod.toUpperCase()} (${order.paymentStatus.toUpperCase()})
 ${order.upiTxnId ? `*UPI Txn ID:* ${order.upiTxnId}\n` : ''}${
   order.orderNotes ? `*Special Request:* ${order.orderNotes}\n` : ''
-}
+}${trackingLink}
 _Sent via Punjabi Bistro & Bakery Dharamkot Website_`;
 
     return `https://wa.me/${businessSettings.whatsapp}?text=${encodeURIComponent(message)}`;
@@ -909,6 +1106,10 @@ _Sent via Punjabi Bistro & Bakery Dharamkot Website_`;
       value={{
         products,
         categories: INITIAL_CATEGORIES,
+        selectedCategory,
+        setSelectedCategory,
+        fulfillmentMode,
+        setFulfillmentMode,
         updateProduct,
         toggleProductAvailability,
         addProduct,
@@ -928,13 +1129,26 @@ _Sent via Punjabi Bistro & Bakery Dharamkot Website_`;
         updateBusinessSettings,
         isStoreOpen,
 
+        coupons,
         appliedCoupon,
         couponError,
         applyCoupon,
         removeCoupon,
+        addCoupon,
+        updateCoupon,
+        deleteCoupon,
+        toggleCouponActive,
 
         orders,
         currentOrder,
+        customerOrders,
+        trackingOrderNumber,
+        setTrackingOrderNumber,
+        trackingToken,
+        setTrackingToken,
+        getCustomerToken,
+        saveCustomerToken,
+        loadAdminOrders,
         placeOrder,
         updateOrderStatus,
         delayOrder,
@@ -961,8 +1175,6 @@ _Sent via Punjabi Bistro & Bakery Dharamkot Website_`;
         setIsCartOpen,
         isTrackingOpen,
         setIsTrackingOpen,
-        trackingOrderNumber,
-        setTrackingOrderNumber,
         isCakeStudioOpen,
         setIsCakeStudioOpen,
         isIssueModalOpen,

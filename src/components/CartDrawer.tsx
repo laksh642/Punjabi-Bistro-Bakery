@@ -30,6 +30,7 @@ export const CartDrawer: React.FC = () => {
     setIsCartOpen,
     deliveryZones,
     businessSettings,
+    coupons,
     appliedCoupon,
     couponError,
     applyCoupon,
@@ -37,6 +38,7 @@ export const CartDrawer: React.FC = () => {
     placeOrder,
     setIsTrackingOpen,
     setTrackingOrderNumber,
+    setTrackingToken,
     generateWhatsAppOrderUrl,
   } = useStore();
 
@@ -77,8 +79,14 @@ export const CartDrawer: React.FC = () => {
   // Discount calculation
   let discountAmount = 0;
   if (appliedCoupon) {
-    const rawDiscount = (cartSubtotal * appliedCoupon.discountPercentage) / 100;
-    discountAmount = Math.min(rawDiscount, appliedCoupon.maxDiscount);
+    if (appliedCoupon.discountType === 'flat') {
+      discountAmount = Math.min(cartSubtotal, appliedCoupon.discountValue);
+    } else {
+      const rawDiscount = (cartSubtotal * appliedCoupon.discountValue) / 100;
+      discountAmount = appliedCoupon.maxDiscount
+        ? Math.min(rawDiscount, appliedCoupon.maxDiscount)
+        : rawDiscount;
+    }
   }
 
   const finalTotal = Math.max(0, cartSubtotal + deliveryFee - discountAmount);
@@ -271,7 +279,7 @@ export const CartDrawer: React.FC = () => {
                 </div>
 
                 {/* Coupon Code Section */}
-                <div className="pt-3 border-t border-emerald-100">
+                <div className="pt-3 border-t border-emerald-100 space-y-2">
                   {appliedCoupon ? (
                     <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 flex items-center justify-between text-xs">
                       <div className="flex items-center gap-1.5 text-emerald-800 font-semibold">
@@ -287,26 +295,66 @@ export const CartDrawer: React.FC = () => {
                       </button>
                     </div>
                   ) : (
-                    <form onSubmit={handleApplyCoupon} className="space-y-1">
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={couponInput}
-                          onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
-                          placeholder="Coupon code (e.g. WELCOME10)"
-                          className="flex-1 text-xs px-3 py-2 bg-white border border-emerald-200 rounded-xl text-emerald-950 focus:outline-none focus:border-emerald-600"
-                        />
-                        <button
-                          type="submit"
-                          className="bg-emerald-800 text-white text-xs font-semibold px-3 py-2 rounded-xl hover:bg-emerald-900 transition-colors cursor-pointer"
-                        >
-                          Apply
-                        </button>
-                      </div>
-                      {couponError && (
-                        <p className="text-[11px] text-rose-600 font-medium">{couponError}</p>
+                    <div className="space-y-2">
+                      <form onSubmit={handleApplyCoupon} className="space-y-1">
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={couponInput}
+                            onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                            placeholder="Coupon code (e.g. BISTRO100)"
+                            className="flex-1 text-xs px-3 py-2 bg-white border border-emerald-200 rounded-xl text-emerald-950 focus:outline-none focus:border-emerald-600"
+                          />
+                          <button
+                            type="submit"
+                            className="bg-emerald-800 text-white text-xs font-semibold px-3 py-2 rounded-xl hover:bg-emerald-900 transition-colors cursor-pointer"
+                          >
+                            Apply
+                          </button>
+                        </div>
+                        {couponError && (
+                          <p className="text-[11px] text-rose-600 font-medium">{couponError}</p>
+                        )}
+                      </form>
+
+                      {/* Store-Owner Active Coupons Quick Tap */}
+                      {coupons.filter((c) => c.isActive).length > 0 && (
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-bold text-stone-500 uppercase tracking-wider">
+                            Available Store Offers:
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {coupons
+                              .filter((c) => c.isActive)
+                              .slice(0, 3)
+                              .map((coupon) => {
+                                const meetsCriteria = cartSubtotal >= coupon.minOrder;
+                                return (
+                                  <button
+                                    key={coupon.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setCouponInput(coupon.code);
+                                      applyCoupon(coupon.code);
+                                    }}
+                                    className={`text-[11px] px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                                      meetsCriteria
+                                        ? 'bg-emerald-50 border-emerald-300 text-emerald-900 hover:bg-emerald-100 font-bold'
+                                        : 'bg-stone-50 border-stone-200 text-stone-600 hover:bg-stone-100'
+                                    }`}
+                                  >
+                                    <Tag className="w-2.5 h-2.5 text-emerald-600" />
+                                    <span>{coupon.code}</span>
+                                    <span className="text-[10px] opacity-75 font-normal">
+                                      (Min ₹{coupon.minOrder})
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                          </div>
+                        </div>
                       )}
-                    </form>
+                    </div>
                   )}
                 </div>
 
@@ -628,6 +676,9 @@ export const CartDrawer: React.FC = () => {
                     onClick={() => {
                       setIsCartOpen(false);
                       setTrackingOrderNumber(confirmedOrder.orderNumber);
+                      if (confirmedOrder.trackingToken) {
+                        setTrackingToken(confirmedOrder.trackingToken);
+                      }
                       setIsTrackingOpen(true);
                       setCheckoutStep('cart');
                     }}

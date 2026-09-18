@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Minus, Check, Sparkles, Heart, Flame, ShieldCheck, Clock } from 'lucide-react';
 import { Product } from '../types';
 import { useStore } from '../context/StoreContext';
@@ -10,6 +11,7 @@ interface ProductCardProps {
 
 export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenDetails }) => {
   const { cart, addToCart, updateCartQuantity, favorites, toggleFavorite } = useStore();
+  const [justAdded, setJustAdded] = useState(false);
 
   // Find if this product is in cart (any option)
   const cartItemsForProduct = cart.filter((i) => i.productId === product.id);
@@ -26,6 +28,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenDetails
       onOpenDetails(product);
     } else {
       addToCart(product, 1);
+      setJustAdded(true);
+      setTimeout(() => setJustAdded(false), 900);
     }
   };
 
@@ -43,6 +47,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenDetails
     e.stopPropagation();
     if (cartItemsForProduct.length === 1) {
       updateCartQuantity(cartItemsForProduct[0].cartItemId, cartItemsForProduct[0].quantity + 1);
+      setJustAdded(true);
+      setTimeout(() => setJustAdded(false), 900);
     } else {
       onOpenDetails(product);
     }
@@ -152,40 +158,67 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenDetails
           </div>
 
           {/* Add / Quantity Control */}
-          <div>
-            {product.isAvailable ? (
-              totalQtyInCart > 0 ? (
-                <div
-                  className="flex items-center gap-2 bg-emerald-700 text-white rounded-xl px-2 py-1 shadow-xs"
-                  onClick={(e) => e.stopPropagation()}
+          <div className="relative">
+            {/* Temporary Floating "+1 Added" badge */}
+            <AnimatePresence>
+              {justAdded && (
+                <motion.span
+                  initial={{ opacity: 0, y: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, y: -22, scale: 1 }}
+                  exit={{ opacity: 0, y: -30, scale: 0.8 }}
+                  transition={{ duration: 0.4 }}
+                  className="absolute -top-1 right-2 bg-emerald-600 text-white text-[10px] font-black px-1.5 py-0.2 rounded-full shadow-md pointer-events-none z-20"
                 >
-                  <button
-                    onClick={handleDecrease}
-                    className="p-1 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer"
-                    title="Decrease quantity"
+                  +1
+                </motion.span>
+              )}
+            </AnimatePresence>
+
+            {product.isAvailable ? (
+              <AnimatePresence mode="wait">
+                {totalQtyInCart > 0 ? (
+                  <motion.div
+                    key="qty-controls"
+                    initial={{ scale: 0.85, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.85, opacity: 0 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                    className="flex items-center gap-2 bg-emerald-700 text-white rounded-xl px-2 py-1 shadow-xs"
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    <Minus className="w-3.5 h-3.5" />
-                  </button>
-                  <span className="text-xs font-bold px-1 min-w-[14px] text-center">
-                    {totalQtyInCart}
-                  </span>
-                  <button
-                    onClick={handleIncrease}
-                    className="p-1 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer"
-                    title="Increase quantity"
+                    <button
+                      onClick={handleDecrease}
+                      className="p-1 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer active:scale-90"
+                      title="Decrease quantity"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="text-xs font-bold px-1 min-w-[14px] text-center">
+                      {totalQtyInCart}
+                    </span>
+                    <button
+                      onClick={handleIncrease}
+                      className="p-1 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer active:scale-90"
+                      title="Increase quantity"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </motion.div>
+                ) : (
+                  <motion.button
+                    key="add-btn"
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.9, opacity: 0 }}
+                    whileTap={{ scale: 0.94 }}
+                    onClick={handleQuickAdd}
+                    className="bg-emerald-50 hover:bg-emerald-700 text-emerald-800 hover:text-white border border-emerald-200 hover:border-emerald-700 font-bold text-xs px-3.5 py-1.5 rounded-xl transition-all duration-200 flex items-center gap-1 shadow-xs cursor-pointer group-hover:bg-emerald-700 group-hover:text-white"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={handleQuickAdd}
-                  className="bg-emerald-50 hover:bg-emerald-700 text-emerald-800 hover:text-white border border-emerald-200 hover:border-emerald-700 font-bold text-xs px-3.5 py-1.5 rounded-xl transition-all duration-200 flex items-center gap-1 shadow-xs cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add</span>
-                </button>
-              )
+                    <span>Add</span>
+                  </motion.button>
+                )}
+              </AnimatePresence>
             ) : (
               <span className="text-[11px] text-stone-500 italic">Unavailable</span>
             )}

@@ -17,6 +17,117 @@
   animation-play-state: paused;
 }
 
+/* Food Stage Floating and Bobbing Keyframes */
+@keyframes food-bob-left {
+  0%, 100% {
+    transform: translateY(0px) rotate(-3deg) scale(1);
+  }
+  50% {
+    transform: translateY(-12px) rotate(-6deg) scale(1.02);
+  }
+}
+
+@keyframes food-bob-right {
+  0%, 100% {
+    transform: translateY(0px) rotate(3deg) scale(1);
+  }
+  50% {
+    transform: translateY(-14px) rotate(6deg) scale(1.02);
+  }
+}
+
+@keyframes ingredient-float-1 {
+  0%, 100% {
+    transform: translateY(0px) translateX(0px) rotate(0deg);
+  }
+  33% {
+    transform: translateY(-16px) translateX(8px) rotate(15deg);
+  }
+  66% {
+    transform: translateY(-8px) translateX(-6px) rotate(-10deg);
+  }
+}
+
+@keyframes ingredient-float-2 {
+  0%, 100% {
+    transform: translateY(0px) translateX(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-20px) translateX(-12px) rotate(-25deg);
+  }
+}
+
+@keyframes ingredient-float-3 {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    transform: translateY(-10px) scale(1.08) rotate(18deg);
+  }
+}
+
+@keyframes pulse-subtle {
+  0%, 100% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.03);
+  }
+}
+
+.animate-food-left {
+  animation: food-bob-left 4.8s ease-in-out infinite;
+  will-change: transform;
+}
+
+.animate-food-right {
+  animation: food-bob-right 5.2s ease-in-out infinite;
+  will-change: transform;
+}
+
+.animate-ingredient-1 {
+  animation: ingredient-float-1 7s ease-in-out infinite;
+  will-change: transform;
+}
+
+.animate-ingredient-2 {
+  animation: ingredient-float-2 6.2s ease-in-out infinite;
+  will-change: transform;
+}
+
+.animate-ingredient-3 {
+  animation: ingredient-float-3 8.5s ease-in-out infinite;
+  will-change: transform;
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 2.5s ease-in-out infinite;
+}
+
+/* Custom Outlined Text for Dynamic Banner */
+.text-stroke-banner {
+  -webkit-text-stroke: 1.5px rgba(255, 255, 255, 0.25);
+  color: transparent;
+}
+
+.text-stroke-banner-emerald {
+  -webkit-text-stroke: 1.5px rgba(52, 211, 153, 0.4);
+  color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-food-left,
+  .animate-food-right,
+  .animate-ingredient-1,
+  .animate-ingredient-2,
+  .animate-ingredient-3,
+  .animate-marquee {
+    animation: none !important;
+  }
+}
+
 @layer base {
   html {
     scroll-behavior: smooth;

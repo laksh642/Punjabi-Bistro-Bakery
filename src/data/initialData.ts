@@ -606,6 +606,7 @@ export const INITIAL_ORDERS: Order[] = [
   {
     id: 'ord-101',
     orderNumber: 'PB-4081',
+    trackingToken: 'f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0',
     customerName: 'Gurpreet Singh',
     customerPhone: '9876543210',
     orderType: 'delivery',
@@ -647,6 +648,7 @@ export const INITIAL_ORDERS: Order[] = [
   {
     id: 'ord-102',
     orderNumber: 'PB-4080',
+    trackingToken: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4',
     customerName: 'Navjot Kaur',
     customerPhone: '9812345678',
     orderType: 'takeaway',
@@ -679,6 +681,7 @@ export const INITIAL_ORDERS: Order[] = [
   {
     id: 'ord-103',
     orderNumber: 'PB-4079',
+    trackingToken: 'c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a1b2',
     customerName: 'Karanvir Sidhu',
     customerPhone: '9988776655',
     orderType: 'dine_in',
