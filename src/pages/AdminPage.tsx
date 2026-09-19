@@ -47,7 +47,7 @@ export const AdminPage: React.FC = () => {
     return <AdminLoginScreen onSignIn={signInWithGoogle} authError={authError} />;
   }
 
-  // 3. Authenticated via Google, but not in admin_users allowlist: Render Access Denied with one-time bootstrap guide
+  // 3. Authenticated via Google, but not in authorized staff allowlist: Render Access Restricted
   if (!isAuthorized) {
     return (
       <AdminAccessDenied
@@ -55,6 +55,7 @@ export const AdminPage: React.FC = () => {
         onSignOut={signOut}
         onRefresh={refreshAuthorization}
         isChecking={isCheckingAuth}
+        authError={authError}
       />
     );
   }

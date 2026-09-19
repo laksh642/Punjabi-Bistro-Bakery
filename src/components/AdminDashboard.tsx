@@ -34,7 +34,7 @@ import {
 import { useStore } from '../context/StoreContext';
 import { Order, OrderStatus, Product, CustomCakeEnquiry, DeliveryZone } from '../types';
 import { PunjabiBistroLogo } from './PunjabiBistroLogo';
-import { SUPABASE_SETUP_SQL, SUPABASE_URL, supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { ProductImageManager } from './ProductImageManager';
 import { AdminUsersManager } from './AdminUsersManager';
 import { AdminCouponManager } from './AdminCouponManager';
@@ -89,15 +89,8 @@ export const AdminDashboard: React.FC = () => {
   }, []);
 
   const [activeTab, setActiveTab] = useState<
-    'orders' | 'menu' | 'cakes' | 'coupons' | 'zones' | 'issues' | 'settings' | 'analytics' | 'database'
+    'orders' | 'menu' | 'cakes' | 'coupons' | 'zones' | 'issues' | 'settings' | 'analytics'
   >('orders');
-
-  const [copiedSql, setCopiedSql] = useState(false);
-  const handleCopySql = () => {
-    navigator.clipboard.writeText(SUPABASE_SETUP_SQL);
-    setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 2500);
-  };
 
   // Delay Order Modal State
   const [delayModalOrder, setDelayModalOrder] = useState<Order | null>(null);
@@ -238,15 +231,14 @@ export const AdminDashboard: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3">
-              {/* Supabase Cloud Live Status Pill */}
-              <button
-                onClick={() => setActiveTab('database')}
-                className="flex items-center gap-1.5 bg-emerald-900/80 hover:bg-emerald-900 border border-emerald-800 px-2.5 sm:px-3 py-1.5 rounded-full text-xs transition-colors cursor-pointer"
-                title="View Supabase Cloud status and database schema"
+              {/* Live Kitchen Sync Status Pill */}
+              <div
+                className="flex items-center gap-1.5 bg-emerald-900/80 border border-emerald-800 px-2.5 sm:px-3 py-1.5 rounded-full text-xs"
+                title="Live kitchen synchronization"
               >
                 <Cloud className="w-3.5 h-3.5 text-emerald-300" />
                 <span className="text-emerald-100 font-medium text-[11px] hidden md:inline">
-                  Supabase Cloud
+                  Live Sync
                 </span>
                 <span
                   className={`w-2 h-2 rounded-full ${
@@ -255,17 +247,17 @@ export const AdminDashboard: React.FC = () => {
                       : 'bg-amber-400 animate-pulse'
                   }`}
                 />
-              </button>
+              </div>
 
-              {/* Quick Cloud Sync Button */}
+              {/* Quick Sync Button */}
               <button
                 onClick={() => syncWithCloud()}
                 disabled={isCloudSyncing}
-                title="Sync with Supabase Cloud now"
+                title="Refresh live orders"
                 className="flex items-center gap-1 bg-emerald-900/80 hover:bg-emerald-900 border border-emerald-800 text-emerald-200 hover:text-white px-2.5 py-1.5 rounded-xl text-xs transition-all disabled:opacity-50 cursor-pointer"
               >
                 <RefreshCw className={`w-3.5 h-3.5 text-emerald-300 ${isCloudSyncing ? 'animate-spin' : ''}`} />
-                <span className="hidden sm:inline text-[11px]">Sync</span>
+                <span className="hidden sm:inline text-[11px]">{isCloudSyncing ? 'Syncing...' : 'Sync'}</span>
               </button>
 
               {/* Manual Open / Close quick toggle */}
@@ -392,21 +384,6 @@ export const AdminDashboard: React.FC = () => {
             >
               <Sliders className="w-3.5 h-3.5" />
               <span>Store Settings</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('database')}
-              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
-                activeTab === 'database'
-                  ? 'bg-emerald-700 text-white font-bold'
-                  : 'text-stone-300 hover:bg-stone-800'
-              }`}
-            >
-              <Database className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Supabase Cloud</span>
-              {supabaseStatus?.connected && (
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-              )}
             </button>
           </div>
         </div>
@@ -1131,276 +1108,6 @@ export const AdminDashboard: React.FC = () => {
                   {cakeEnquiries.length}
                 </div>
                 <div className="text-[11px] text-stone-500 mt-1">Celebration orders logged</div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 8: SUPABASE CLOUD DATABASE & REALTIME */}
-        {activeTab === 'database' && (
-          <div className="space-y-6">
-            {/* Header & Quick Actions */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-emerald-100 shadow-xs">
-              <div className="flex items-start gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-emerald-100 flex items-center justify-center text-emerald-700 flex-shrink-0">
-                  <Database className="w-6 h-6" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="font-serif text-xl sm:text-2xl font-bold text-emerald-950">
-                      Supabase Cloud Database
-                    </h2>
-                    <span
-                      className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
-                        supabaseStatus?.connected
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : 'bg-amber-100 text-amber-800'
-                      }`}
-                    >
-                      {supabaseStatus?.connected ? 'Live Connected' : 'Configured'}
-                    </span>
-                  </div>
-                  <p className="text-xs text-stone-600 mt-1">
-                    Realtime PostgreSQL cloud synchronization for orders, custom cake enquiries, reviews, and support tickets.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => syncWithCloud()}
-                  disabled={isCloudSyncing}
-                  className="flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isCloudSyncing ? 'animate-spin' : ''}`} />
-                  <span>{isCloudSyncing ? 'Syncing...' : 'Sync Cloud Now'}</span>
-                </button>
-
-                <a
-                  href="https://supabase.com/dashboard/project/mlbjulhzbhnqkzzohgcm"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold px-4 py-2.5 rounded-xl transition-colors"
-                >
-                  <span>Dashboard</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              </div>
-            </div>
-
-            {/* Connection & Status Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-white p-5 rounded-2xl border border-emerald-100 space-y-2">
-                <div className="text-xs font-bold text-stone-500 uppercase tracking-wider">
-                  Project Endpoint
-                </div>
-                <div className="font-mono text-xs text-emerald-950 font-semibold break-all bg-emerald-50/50 p-2 rounded-lg border border-emerald-100">
-                  {SUPABASE_URL}
-                </div>
-                <div className="text-[11px] text-stone-500 flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
-                  <span>Direct REST & WebSocket Gateway</span>
-                </div>
-              </div>
-
-              <div className="bg-white p-5 rounded-2xl border border-emerald-100 space-y-2">
-                <div className="text-xs font-bold text-stone-500 uppercase tracking-wider">
-                  Realtime Channel
-                </div>
-                <div className="font-mono text-xs text-emerald-800 font-bold bg-emerald-50 p-2 rounded-lg border border-emerald-200 flex items-center justify-between">
-                  <span>pb-live-sync</span>
-                  <span className="text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded">SUBSCRIBED</span>
-                </div>
-                <div className="text-[11px] text-stone-500">
-                  Kitchen order updates & new cake enquiries stream live to all active screens.
-                </div>
-              </div>
-
-              <div className="bg-white p-5 rounded-2xl border border-emerald-100 space-y-2">
-                <div className="text-xs font-bold text-stone-500 uppercase tracking-wider">
-                  Local Cache & Fallback
-                </div>
-                <div className="font-mono text-xs text-amber-900 font-bold bg-amber-50 p-2 rounded-lg border border-amber-200 flex items-center justify-between">
-                  <span>localStorage</span>
-                  <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">HYBRID ACTIVE</span>
-                </div>
-                <div className="text-[11px] text-stone-500">
-                  Zero downtime: offline orders persist locally and reconcile when connection restores.
-                </div>
-              </div>
-            </div>
-
-            {/* Cloud Tables Status Matrix */}
-            <div className="bg-white rounded-3xl border border-emerald-200 p-6 shadow-xs space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-serif font-bold text-lg text-emerald-950">
-                    Database Tables & Replication Health
-                  </h3>
-                  <p className="text-xs text-stone-500">
-                    Live verification against your Supabase PostgreSQL instance
-                  </p>
-                </div>
-                <button
-                  onClick={() => syncWithCloud()}
-                  className="text-xs text-emerald-700 hover:text-emerald-800 font-bold flex items-center gap-1 cursor-pointer"
-                >
-                  <RefreshCw className="w-3 h-3" /> Re-check Tables
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs font-bold text-emerald-950">public.orders</span>
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        supabaseStatus?.tablesStatus.orders ? 'bg-emerald-500' : 'bg-amber-400'
-                      }`}
-                    />
-                  </div>
-                  <div className="text-2xl font-bold font-serif text-emerald-950">{orders.length}</div>
-                  <div className="text-[11px] text-emerald-850/70">Orders synced • Realtime enabled</div>
-                </div>
-
-                <div className="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs font-bold text-emerald-950">custom_cake_enquiries</span>
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        supabaseStatus?.tablesStatus.cake_enquiries ? 'bg-emerald-500' : 'bg-amber-400'
-                      }`}
-                    />
-                  </div>
-                  <div className="text-2xl font-bold font-serif text-emerald-950">{cakeEnquiries.length}</div>
-                  <div className="text-[11px] text-emerald-850/70">Enquiries synced • Realtime enabled</div>
-                </div>
-
-                <div className="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs font-bold text-emerald-950">public.reviews</span>
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        supabaseStatus?.tablesStatus.reviews ? 'bg-emerald-500' : 'bg-amber-400'
-                      }`}
-                    />
-                  </div>
-                  <div className="text-2xl font-bold font-serif text-emerald-950">{feedbacks.length + 3}</div>
-                  <div className="text-[11px] text-emerald-850/70">Customer ratings & reviews</div>
-                </div>
-
-                <div className="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs font-bold text-emerald-950">customer_issues</span>
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        supabaseStatus?.tablesStatus.customer_issues ? 'bg-emerald-500' : 'bg-amber-400'
-                      }`}
-                    />
-                  </div>
-                  <div className="text-2xl font-bold font-serif text-emerald-950">{issues.length}</div>
-                  <div className="text-[11px] text-emerald-850/70">Escalated support tickets</div>
-                </div>
-
-                <div className="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs font-bold text-emerald-950">public.products</span>
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        supabaseStatus?.tablesStatus.products ? 'bg-emerald-500' : 'bg-amber-400'
-                      }`}
-                    />
-                  </div>
-                  <div className="text-2xl font-bold font-serif text-emerald-950">{products.length}</div>
-                  <div className="text-[11px] text-emerald-850/70">Live menu items & pricing</div>
-                </div>
-
-                <div className="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs font-bold text-emerald-950">Storage: product-images</span>
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        supabaseStatus?.storageStatus?.productImagesBucket ? 'bg-emerald-500' : 'bg-amber-400'
-                      }`}
-                    />
-                  </div>
-                  <div className="text-2xl font-bold font-serif text-emerald-950">Active</div>
-                  <div className="text-[11px] text-emerald-850/70">Supabase Storage CDN bucket</div>
-                </div>
-              </div>
-            </div>
-
-            {/* SQL Setup Script & 1-Click Copy */}
-            <div className="bg-white rounded-3xl border border-emerald-200 p-6 shadow-xs space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <h3 className="font-serif font-bold text-lg text-emerald-950">
-                    Supabase Schema Setup Script
-                  </h3>
-                  <p className="text-xs text-stone-500">
-                    Run this SQL script in your Supabase project SQL Editor to instantiate all tables, security policies, and realtime broadcast publications.
-                  </p>
-                </div>
-
-                <button
-                  onClick={handleCopySql}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer shadow-xs bg-emerald-700 hover:bg-emerald-800 text-white"
-                >
-                  {copiedSql ? (
-                    <>
-                      <Check className="w-4 h-4" />
-                      <span>Copied to Clipboard!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-4 h-4" />
-                      <span>Copy SQL Setup (1-Click)</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
-              {/* Instructions Steps */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-100">
-                  <div className="font-bold text-emerald-800 mb-1">Step 1: Open SQL Editor</div>
-                  <div className="text-stone-600">
-                    Open your Supabase dashboard at{' '}
-                    <a
-                      href="https://supabase.com/dashboard/project/mlbjulhzbhnqkzzohgcm/sql"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline text-emerald-700 font-semibold"
-                    >
-                      Project SQL Editor
-                    </a>
-                  </div>
-                </div>
-
-                <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-100">
-                  <div className="font-bold text-emerald-800 mb-1">Step 2: Paste SQL</div>
-                  <div className="text-stone-600">
-                    Click the <strong>"Copy SQL Setup (1-Click)"</strong> button above and paste into the editor window.
-                  </div>
-                </div>
-
-                <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-100">
-                  <div className="font-bold text-emerald-800 mb-1">Step 3: Click Run</div>
-                  <div className="text-stone-600">
-                    Press <strong>Run</strong> in Supabase. Tables and Realtime streaming will be live immediately!
-                  </div>
-                </div>
-              </div>
-
-              {/* SQL Code Preview */}
-              <div className="relative">
-                <div className="flex items-center justify-between bg-stone-900 text-stone-300 px-4 py-2 rounded-t-2xl text-xs font-mono">
-                  <span>supabase-schema.sql</span>
-                  <span className="text-stone-400 text-[11px]">PostgreSQL DDL</span>
-                </div>
-                <pre className="bg-stone-950 text-stone-200 font-mono text-[11px] p-4 rounded-b-2xl overflow-x-auto max-h-72 leading-relaxed">
-                  <code>{SUPABASE_SETUP_SQL}</code>
-                </pre>
               </div>
             </div>
           </div>

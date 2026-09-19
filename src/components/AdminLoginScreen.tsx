@@ -130,10 +130,10 @@ export const AdminLoginScreen: React.FC<AdminLoginScreenProps> = ({ onSignIn, au
 
             <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-100 text-center">
               <p className="text-xs text-stone-600 font-medium">
-                Only specifically authorized bakery administrator Google accounts can access this portal.
+                Only authorized bakery staff and owner Google accounts can access this portal.
               </p>
               <p className="text-[11px] text-stone-400 mt-1">
-                Zero passwords required • Managed via Supabase Auth & RLS
+                Authorized staff gateway • Verified Google credentials
               </p>
             </div>
           </div>

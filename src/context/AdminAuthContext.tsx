@@ -44,6 +44,9 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setAdminRecord(null);
         if (authResult.error) {
           console.warn('Admin authorization notice:', authResult.error);
+          setAuthError(authResult.error);
+        } else {
+          setAuthError(null);
         }
       }
     } catch (err: unknown) {
@@ -155,8 +158,22 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const handleRefresh = async () => {
-    if (user?.id) {
-      await verifyAuthorization(user.id);
+    try {
+      setIsCheckingAuth(true);
+      const { data } = await supabase.auth.getUser();
+      const freshUser = data?.user ?? user;
+      if (freshUser?.id) {
+        setUser(freshUser);
+        await verifyAuthorization(freshUser.id);
+      } else {
+        setIsAuthorized(false);
+      }
+    } catch {
+      if (user?.id) {
+        await verifyAuthorization(user.id);
+      }
+    } finally {
+      setIsCheckingAuth(false);
     }
   };
 

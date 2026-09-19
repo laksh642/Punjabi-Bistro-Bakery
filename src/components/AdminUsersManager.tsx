@@ -100,13 +100,10 @@ export const AdminUsersManager: React.FC = () => {
           </div>
           <div>
             <h3 className="font-serif font-bold text-base text-emerald-950 flex items-center gap-2">
-              <span>Admin Access & Google OAuth Management</span>
-              <span className="text-[10px] font-sans font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                RLS Enforced
-              </span>
+              <span>Admin Access & Staff Authorization</span>
             </h3>
             <p className="text-xs text-stone-500">
-              Only verified Google accounts listed below can log into this operations portal. Passwords have been retired.
+              Only verified Google accounts listed below can access this operations portal.
             </p>
           </div>
         </div>
@@ -140,18 +137,17 @@ export const AdminUsersManager: React.FC = () => {
       {/* Active Admins List */}
       <div className="bg-stone-50 rounded-2xl border border-stone-200 p-4 sm:p-5 space-y-3">
         <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-stone-600">
-          <span>Authorized Google Administrators ({adminList.length})</span>
-          <span className="text-[11px] font-normal lowercase text-stone-400">table: public.admin_users</span>
+          <span>Authorized Staff & Owners ({adminList.length})</span>
         </div>
 
         {isLoading ? (
           <div className="py-6 text-center text-xs text-stone-500 flex items-center justify-center gap-2">
             <div className="w-4 h-4 border-2 border-emerald-700 border-t-transparent rounded-full animate-spin" />
-            <span>Loading admin allowlist...</span>
+            <span>Loading authorized accounts...</span>
           </div>
         ) : adminList.length === 0 ? (
           <div className="p-4 rounded-xl bg-white border border-stone-200 text-center text-xs text-stone-500">
-            No administrators found in `public.admin_users`. If you just set up the schema, insert the owner account using the SQL provided in the Setup tab.
+            No authorized accounts found. Add an administrator below to grant access.
           </div>
         ) : (
           <div className="space-y-2">
@@ -176,7 +172,6 @@ export const AdminUsersManager: React.FC = () => {
                         </span>
                       )}
                     </div>
-                    <div className="font-mono text-[10px] text-stone-400">UUID: {adm.id}</div>
                   </div>
 
                   <div className="flex items-center gap-3">
@@ -213,7 +208,7 @@ export const AdminUsersManager: React.FC = () => {
         </div>
 
         <p className="text-xs text-stone-500">
-          Have the team member click "Continue with Google" once on the login screen to generate their Supabase Auth UUID, then enter their details below to grant permanent access.
+          Enter the team member's verified Google account email and account user ID to grant operations portal access.
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
@@ -233,14 +228,14 @@ export const AdminUsersManager: React.FC = () => {
 
           <div>
             <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
-              Supabase Auth UUID *
+              Account User ID *
             </label>
             <input
               type="text"
               required
               value={newUserId}
               onChange={(e) => setNewUserId(e.target.value)}
-              placeholder="e.g. e84c47b5-..."
+              placeholder="User ID"
               className="w-full font-mono px-3.5 py-2.5 rounded-xl border border-emerald-200 bg-white focus:outline-none focus:border-emerald-600 text-emerald-950"
             />
           </div>
