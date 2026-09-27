@@ -741,11 +741,28 @@ app.post('/api/admin/reviews/reply', requireAdmin, async (req: AuthenticatedRequ
 /**
  * POST /api/orders
  * Resilient server-side persistence for customer orders.
- * Inserts order into Supabase with automatic schema column adaptation and
- * metadata preservation inside items JSONB array.
+ * STRICT: Requires valid Supabase Auth session token from authenticated customer.
+ * Sets order.user_id = authenticated user ID to enforce strict ownership.
  */
 app.post('/api/orders', async (req: Request, res: Response) => {
   try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader ? authHeader.replace(/^Bearer\s+/i, '').trim() : '';
+
+    if (!token) {
+      res.status(401).json({ error: 'Customer sign-in with Google is required to place an order.' });
+      return;
+    }
+
+    // Verify token with Supabase Auth
+    const { data: userData, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !userData?.user) {
+      res.status(401).json({ error: 'Valid customer sign-in with Google is required to place an order.' });
+      return;
+    }
+
+    const authenticatedUser = userData.user;
+
     const order = req.body;
     if (!order || !order.customerName || !order.customerPhone || !Array.isArray(order.items)) {
       res.status(400).json({ error: 'Invalid order data: customerName, customerPhone and items are required' });
@@ -761,18 +778,21 @@ app.post('/api/orders', async (req: Request, res: Response) => {
       ...order.items.filter((i: any) => !i || !i._meta),
       {
         _meta: {
-          userId: order.userId || null,
-          customerEmail: order.customerEmail || null,
+          userId: authenticatedUser.id,
+          customerEmail: authenticatedUser.email || order.customerEmail || null,
           trackingToken: trackingToken,
           orderNumber: orderNumber,
         },
       },
     ];
 
-    // Base payload matching guaranteed Supabase orders columns
+    // Base payload matching guaranteed Supabase orders columns with verified user_id
     const payload: Record<string, any> = {
       id: orderId,
       order_number: orderNumber,
+      tracking_token: trackingToken,
+      user_id: authenticatedUser.id,
+      customer_email: authenticatedUser.email || order.customerEmail || null,
       customer_name: order.customerName,
       customer_phone: order.customerPhone,
       order_type: order.orderType || 'delivery',
@@ -838,6 +858,8 @@ app.post('/api/orders', async (req: Request, res: Response) => {
       id: orderId,
       orderNumber,
       trackingToken,
+      userId: authenticatedUser.id,
+      customerEmail: authenticatedUser.email || order.customerEmail || undefined,
       items: order.items.filter((i: any) => !i || !i._meta),
       status: payload.status,
       createdAt: payload.created_at,
@@ -852,60 +874,41 @@ app.post('/api/orders', async (req: Request, res: Response) => {
 
 /**
  * GET /api/customer/orders
- * Retrieves all orders for a verified customer by userId, email, or phone.
+ * STRICT: Retrieves orders ONLY for the verified authenticated customer.
+ * Customer A can NEVER access Customer B's orders.
  */
 app.get('/api/customer/orders', async (req: Request, res: Response) => {
-  const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : '';
-  const email = typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : '';
-  const phone = typeof req.query.phone === 'string' ? req.query.phone.replace(/\D/g, '') : '';
+  const authHeader = req.headers.authorization;
+  const token = authHeader ? authHeader.replace(/^Bearer\s+/i, '').trim() : '';
 
-  if (!userId && !email && !phone) {
-    res.json([]);
+  if (!token) {
+    res.status(401).json({ error: 'Authentication required to view orders.' });
     return;
   }
 
   try {
+    const { data: userData, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !userData?.user) {
+      res.status(401).json({ error: 'Invalid or expired customer session.' });
+      return;
+    }
+
+    const authenticatedUser = userData.user;
+
+    // Direct database query scoped strictly to authenticated user's ID
     const { data, error } = await supabase
       .from('orders')
       .select('*')
+      .eq('user_id', authenticatedUser.id)
       .order('created_at', { ascending: false });
 
     if (error) {
-      res.status(500).json({ error: error.message });
+      console.error('Error fetching customer orders:', error);
+      res.status(500).json({ error: 'Failed to retrieve orders.' });
       return;
     }
 
-    if (!Array.isArray(data)) {
-      res.json([]);
-      return;
-    }
-
-    const matched = data.filter((row: any) => {
-      // Direct column match if column exists
-      if (userId && row.user_id === userId) return true;
-      if (email && row.customer_email && row.customer_email.toLowerCase() === email) return true;
-
-      // Meta object in items JSONB
-      if (Array.isArray(row.items)) {
-        const meta = row.items.find((i: any) => i && i._meta)?._meta;
-        if (meta) {
-          if (userId && meta.userId === userId) return true;
-          if (email && meta.customerEmail && meta.customerEmail.toLowerCase() === email) return true;
-        }
-      }
-
-      // Phone matching
-      if (phone && phone.length >= 10) {
-        const cleanRowPhone = String(row.customer_phone || '').replace(/\D/g, '');
-        if (cleanRowPhone && (cleanRowPhone === phone || cleanRowPhone.endsWith(phone) || phone.endsWith(cleanRowPhone))) {
-          return true;
-        }
-      }
-
-      return false;
-    });
-
-    res.json(matched);
+    res.json(data || []);
   } catch (err: any) {
     res.status(500).json({ error: err?.message || 'Failed to fetch customer orders' });
   }

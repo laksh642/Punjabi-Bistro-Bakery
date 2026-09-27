@@ -577,7 +577,7 @@ export const INITIAL_REVIEWS: ReviewItem[] = [
     author: 'Gurvinder Gill',
     rating: 4,
     date: '1 month ago',
-    text: 'Food is 10/10 especially the Mexican wrap and Fruit Beer. Previously delivery charges used to vary, but great to see their new fixed zone rates and real-time tracking now!',
+    text: 'Food is 10/10 especially the Mexican wrap and Fruit Beer. Previously delivery charges used to vary, but great to see their new fixed zone rates and live order status updates now!',
     category: 'Delivery',
     verifiedCustomer: true,
     ownerReply: 'Sat Sri Akal Gurvinder ji. We now have transparent delivery zones so every customer knows exact charges upfront!',

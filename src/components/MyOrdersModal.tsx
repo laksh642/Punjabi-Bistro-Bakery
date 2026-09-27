@@ -9,7 +9,6 @@ import {
   AlertCircle,
   ChevronRight,
   ArrowLeft,
-  ExternalLink,
   MapPin,
   Phone,
   Store,
@@ -23,7 +22,6 @@ import { useCustomerAuth } from '../context/CustomerAuthContext';
 import { useStore } from '../context/StoreContext';
 import { Order, OrderStatus } from '../types';
 import { supabase } from '../lib/supabase';
-import { Link } from 'react-router-dom';
 
 const STATUS_BADGES: Record<
   OrderStatus,
@@ -88,7 +86,14 @@ const STATUS_BADGES: Record<
 };
 
 export const MyOrdersModal: React.FC = () => {
-  const { isMyOrdersOpen, setIsMyOrdersOpen, user, openLoginModal } = useCustomerAuth();
+  const {
+    isMyOrdersOpen,
+    setIsMyOrdersOpen,
+    user,
+    openLoginModal,
+    selectedOrderNumberForModal,
+    setSelectedOrderNumberForModal,
+  } = useCustomerAuth();
   const { customerOrders, syncCustomerOrders, setIsIssueModalOpen } = useStore();
 
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -103,6 +108,38 @@ export const MyOrdersModal: React.FC = () => {
         .finally(() => setIsRefreshing(false));
     }
   }, [isMyOrdersOpen, user, syncCustomerOrders]);
+
+  // If opened with a specific order number requested, auto-select it once loaded
+  useEffect(() => {
+    if (isMyOrdersOpen && selectedOrderNumberForModal) {
+      const match = customerOrders.find(
+        (o) =>
+          o.orderNumber === selectedOrderNumberForModal ||
+          o.id === selectedOrderNumberForModal ||
+          (o.orderNumber && selectedOrderNumberForModal.includes(o.orderNumber))
+      );
+      if (match) {
+        setSelectedOrder(match);
+      }
+    }
+  }, [isMyOrdersOpen, selectedOrderNumberForModal, customerOrders]);
+
+  // Keep currently displayed order in sync with any realtime updates in customerOrders
+  useEffect(() => {
+    if (selectedOrder) {
+      const fresh = customerOrders.find(
+        (o) => o.id === selectedOrder.id || o.orderNumber === selectedOrder.orderNumber
+      );
+      if (
+        fresh &&
+        (fresh.status !== selectedOrder.status ||
+          fresh.delayMinutes !== selectedOrder.delayMinutes ||
+          fresh.delayMessage !== selectedOrder.delayMessage)
+      ) {
+        setSelectedOrder(fresh);
+      }
+    }
+  }, [customerOrders, selectedOrder]);
 
   // Supabase Realtime channel for live customer order updates
   useEffect(() => {
@@ -131,13 +168,26 @@ export const MyOrdersModal: React.FC = () => {
 
   if (!isMyOrdersOpen) return null;
 
-  // Filter orders matching user
+  const formatOrderDateTime = (dateStr: string) => {
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  // Strictly filter orders matching the authenticated user's permanent ID
   const userOrders = customerOrders.filter((o) => {
-    if (!user) return true;
-    if (o.userId === user.id) return true;
-    if (user.email && o.customerEmail && o.customerEmail.toLowerCase() === user.email.toLowerCase())
-      return true;
-    return true; // Local device orders as well
+    if (!user) return false;
+    return o.userId === user.id;
   });
 
   const filteredOrders = userOrders.filter((o) => {
@@ -173,7 +223,10 @@ export const MyOrdersModal: React.FC = () => {
             <div className="flex items-center gap-2.5">
               {selectedOrder ? (
                 <button
-                  onClick={() => setSelectedOrder(null)}
+                  onClick={() => {
+                    setSelectedOrder(null);
+                    setSelectedOrderNumberForModal(null);
+                  }}
                   className="p-1.5 -ml-1 text-emerald-200 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
                   title="Back to Orders List"
                 >
@@ -190,13 +243,7 @@ export const MyOrdersModal: React.FC = () => {
                 </h2>
                 <p className="text-xs text-emerald-200/90">
                   {selectedOrder
-                    ? new Date(selectedOrder.createdAt).toLocaleString('en-IN', {
-                        day: 'numeric',
-                        month: 'short',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })
+                    ? formatOrderDateTime(selectedOrder.createdAt)
                     : 'Punjabi Bistro Dharamkot • Live Order History'}
                 </p>
               </div>
@@ -216,6 +263,7 @@ export const MyOrdersModal: React.FC = () => {
               <button
                 onClick={() => {
                   setSelectedOrder(null);
+                  setSelectedOrderNumberForModal(null);
                   setIsMyOrdersOpen(false);
                 }}
                 className="p-1.5 text-emerald-300/80 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
@@ -238,7 +286,7 @@ export const MyOrdersModal: React.FC = () => {
                   Sign in to view your orders
                 </h3>
                 <p className="text-xs text-stone-600 leading-relaxed">
-                  Sign in with your Google account to track your orders, view order history, and re-order your Dharamkot favourites easily.
+                  Sign in with your Google account to view your orders, live status updates, and re-order your Dharamkot favourites easily.
                 </p>
                 <button
                   onClick={() => {
@@ -279,14 +327,10 @@ export const MyOrdersModal: React.FC = () => {
                       </div>
                     </div>
 
-                    <Link
-                      to={`/orders/${selectedOrder.trackingToken || selectedOrder.orderNumber}`}
-                      target="_blank"
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-800 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200 transition-colors"
-                    >
-                      <span>Dedicated Live Tracking</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </Link>
+                    <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <span>Live Status</span>
+                    </div>
                   </div>
 
                   {/* Delay notice if present */}
@@ -536,12 +580,7 @@ export const MyOrdersModal: React.FC = () => {
                                 #{order.orderNumber}
                               </span>
                               <span className="text-[11px] text-stone-400">
-                                {new Date(order.createdAt).toLocaleDateString('en-IN', {
-                                  day: 'numeric',
-                                  month: 'short',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
+                                {formatOrderDateTime(order.createdAt)}
                               </span>
                             </div>
 

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, ShieldCheck, Sparkles, MapPin, Clock, AlertCircle, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { X, ShieldCheck, MapPin, Clock, AlertCircle, ArrowRight } from 'lucide-react';
 import { useCustomerAuth } from '../context/CustomerAuthContext';
 import { PunjabiBistroLogo } from './PunjabiBistroLogo';
 
@@ -9,7 +9,6 @@ export const CustomerAuthModal: React.FC = () => {
     isAuthModalOpen,
     setIsAuthModalOpen,
     loginWithGoogle,
-    loginWithDemoCustomer,
     user,
     customerProfile,
     logoutCustomer,
@@ -29,7 +28,7 @@ export const CustomerAuthModal: React.FC = () => {
       const result = await loginWithGoogle();
       if (!result.success) {
         setAuthError(
-          result.error || 'Google Sign-in could not be completed. You may also use Quick Sign-in below.'
+          result.error || 'Google Sign-in could not be completed. Please try again.'
         );
       }
     } catch (err: any) {
@@ -37,15 +36,6 @@ export const CustomerAuthModal: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleDemoSignIn = () => {
-    loginWithDemoCustomer({
-      name: 'Lakshit Goyal',
-      email: 'lakshit@punjabibistro.com',
-      phone: '9876543210',
-      address: 'Near German Bakery, Dharamkot',
-    });
   };
 
   return (
@@ -73,16 +63,16 @@ export const CustomerAuthModal: React.FC = () => {
               <PunjabiBistroLogo className="w-12 h-12 shadow-md rounded-full bg-white p-1" />
               <div>
                 <span className="text-[10px] font-bold tracking-wider uppercase text-amber-300 bg-amber-400/20 px-2 py-0.5 rounded-full border border-amber-300/30">
-                  Customer Portal
+                  Customer Account
                 </span>
                 <h2 className="text-xl font-serif font-bold text-white leading-tight">
-                  Punjabi Bistro Dharamkot
+                  Punjabi Bistro &amp; Bakery
                 </h2>
               </div>
             </div>
 
             <p className="text-xs text-emerald-100/90 leading-relaxed">
-              Sign in with your Google account to access your orders, track live baking status, and save your Dharamkot delivery address.
+              Sign in with Google to place your order, confirm your Dharamkot delivery address, and view your complete order history.
             </p>
           </div>
 
@@ -99,84 +89,86 @@ export const CustomerAuthModal: React.FC = () => {
             )}
 
             {user ? (
-              // Already Signed In view
+              // Already Signed In State
               <div className="space-y-4">
-                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-full bg-emerald-800 text-white font-bold flex items-center justify-center text-lg shadow-sm">
-                    {customerProfile?.fullName?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || 'C'}
+                <div className="p-4 bg-emerald-50/80 border border-emerald-200 rounded-xl flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-full bg-emerald-700 text-white font-bold text-base flex items-center justify-center shadow-xs">
+                    {(customerProfile?.fullName || user.email || 'U')[0].toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-emerald-950 truncate">
-                      {customerProfile?.fullName || 'Valued Customer'}
-                    </p>
-                    <p className="text-xs text-emerald-700 truncate">{user.email}</p>
-                    <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 font-medium mt-0.5">
-                      <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Authenticated Customer
+                    <h3 className="font-bold text-sm text-emerald-950 truncate">
+                      {customerProfile?.fullName || user.user_metadata?.full_name || 'Valued Customer'}
+                    </h3>
+                    <p className="text-xs text-emerald-800 truncate">{user.email}</p>
+                    <span className="text-[10px] text-emerald-700 font-medium inline-flex items-center gap-1 mt-0.5">
+                      <ShieldCheck className="w-3 h-3" /> Signed in with Google
                     </span>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 pt-2">
+                <div className="grid grid-cols-2 gap-2 pt-1">
                   <button
                     onClick={() => {
                       setIsAuthModalOpen(false);
                       setIsMyOrdersOpen(true);
                     }}
-                    className="p-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer"
+                    className="py-2.5 px-3 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
                   >
-                    <Clock className="w-4 h-4" />
+                    <Clock className="w-3.5 h-3.5" />
                     <span>My Orders</span>
                   </button>
+
                   <button
                     onClick={() => {
                       setIsAuthModalOpen(false);
                       setIsAccountModalOpen(true);
                     }}
-                    className="p-3 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    className="py-2.5 px-3 bg-white hover:bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs font-semibold rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                   >
-                    <MapPin className="w-4 h-4" />
-                    <span>Saved Address</span>
+                    <MapPin className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Delivery Address</span>
                   </button>
                 </div>
 
-                <button
-                  onClick={logoutCustomer}
-                  className="w-full py-2.5 text-xs text-stone-500 hover:text-rose-600 font-semibold transition-colors cursor-pointer"
-                >
-                  Sign Out
-                </button>
+                <div className="pt-2 border-t border-stone-100 flex items-center justify-between">
+                  <button
+                    onClick={() => logoutCustomer()}
+                    className="text-xs text-rose-600 hover:text-rose-700 font-medium cursor-pointer py-1"
+                  >
+                    Sign Out of Account
+                  </button>
+                  <button
+                    onClick={() => setIsAuthModalOpen(false)}
+                    className="text-xs text-stone-500 hover:text-stone-800 font-medium cursor-pointer py-1"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             ) : (
-              // Sign-In View
+              // Sign-in Required View
               <div className="space-y-4">
-                {/* Benefits List */}
-                <div className="space-y-2.5 py-1">
-                  <div className="flex items-center gap-2.5 text-xs text-stone-700">
-                    <div className="w-6 h-6 rounded-lg bg-emerald-100/80 text-emerald-800 flex items-center justify-center shrink-0">
-                      <Clock className="w-3.5 h-3.5" />
-                    </div>
-                    <span>Real-time kitchen order tracking and order history</span>
+                <div className="space-y-2.5 text-xs text-stone-600">
+                  <div className="flex items-start gap-2.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <span>Secure ordering connected to your Google account</span>
                   </div>
-                  <div className="flex items-center gap-2.5 text-xs text-stone-700">
-                    <div className="w-6 h-6 rounded-lg bg-emerald-100/80 text-emerald-800 flex items-center justify-center shrink-0">
-                      <MapPin className="w-3.5 h-3.5" />
-                    </div>
-                    <span>Saved Dharamkot address for instant 1-tap checkout</span>
+                  <div className="flex items-start gap-2.5">
+                    <MapPin className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <span>Save your Dharamkot address for instant one-tap checkout</span>
                   </div>
-                  <div className="flex items-center gap-2.5 text-xs text-stone-700">
-                    <div className="w-6 h-6 rounded-lg bg-emerald-100/80 text-emerald-800 flex items-center justify-center shrink-0">
-                      <ShieldCheck className="w-3.5 h-3.5" />
-                    </div>
-                    <span>Encrypted & secure with official Google Authentication</span>
+                  <div className="flex items-start gap-2.5">
+                    <Clock className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <span>View your baking and delivery progress in real time across any device</span>
                   </div>
                 </div>
 
-                {/* Primary Google Sign In Button */}
+                {/* Primary Google Login Button */}
                 <button
-                  id="google-signin-btn"
+                  id="btn-google-customer-auth"
                   onClick={handleGoogleSignIn}
                   disabled={isLoading}
-                  className="w-full flex items-center justify-center gap-3 py-3.5 px-4 bg-white border border-stone-300 hover:border-emerald-600 hover:bg-stone-50 text-stone-800 rounded-xl font-semibold text-sm shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                  className="w-full py-3 px-4 bg-white hover:bg-stone-50 border-2 border-stone-200 hover:border-emerald-600 text-stone-800 rounded-xl font-semibold text-sm transition-all shadow-xs flex items-center justify-center gap-3 cursor-pointer disabled:opacity-50"
                 >
                   {isLoading ? (
                     <div className="w-5 h-5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
@@ -203,27 +195,8 @@ export const CustomerAuthModal: React.FC = () => {
                   <span>Continue with Google</span>
                 </button>
 
-                {/* Instant Sandbox Testing Fallback Button */}
-                <div className="relative py-1">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-stone-200" />
-                  </div>
-                  <div className="relative flex justify-center text-xs">
-                    <span className="bg-white px-2 text-stone-400 font-medium">Or for testing</span>
-                  </div>
-                </div>
-
-                <button
-                  id="demo-signin-btn"
-                  onClick={handleDemoSignIn}
-                  className="w-full py-2.5 px-3 bg-emerald-50 hover:bg-emerald-100/70 border border-emerald-200 text-emerald-800 rounded-xl font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                  <span>One-Click Test Login (Lakshit Goyal)</span>
-                </button>
-
                 <p className="text-[11px] text-center text-stone-500 leading-tight">
-                  By continuing, you agree to our service terms. Your information is strictly used for order fulfillment in Dharamkot.
+                  By continuing, your order and account will be safely linked to your Google identity.
                 </p>
               </div>
             )}

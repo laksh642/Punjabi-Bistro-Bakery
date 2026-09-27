@@ -16,7 +16,6 @@ import { FAQSection } from '../components/FAQSection';
 import { Footer } from '../components/Footer';
 import { MobileBottomBar } from '../components/MobileBottomBar';
 import { CartDrawer } from '../components/CartDrawer';
-import { OrderTrackingModal } from '../components/OrderTrackingModal';
 import { OrderIssueModal } from '../components/OrderIssueModal';
 import { DigitalQrMenuModal } from '../components/DigitalQrMenuModal';
 import { EgglessMovingBar } from '../components/EgglessMovingBar';
@@ -76,7 +75,6 @@ export const StorefrontPage: React.FC = () => {
 
       {/* Global Modals & Drawers */}
       <CartDrawer />
-      <OrderTrackingModal />
       <OrderIssueModal />
       <DigitalQrMenuModal />
     </div>

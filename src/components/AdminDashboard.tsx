@@ -1304,7 +1304,7 @@ export const AdminDashboard: React.FC = () => {
             </div>
 
             <p className="text-xs text-stone-600 leading-relaxed">
-              Informing the customer early avoids bad Google reviews. This will instantly display a clear delay badge on their live tracking screen.
+              Informing the customer early avoids bad Google reviews. This will instantly display a clear delay badge in their live order status.
             </p>
 
             <form onSubmit={handleApplyDelay} className="space-y-4">
@@ -1354,7 +1354,7 @@ export const AdminDashboard: React.FC = () => {
                   type="submit"
                   className="flex-1 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold py-2 rounded-xl transition-colors shadow-sm cursor-pointer"
                 >
-                  Broadcast Delay to Tracker
+                  Broadcast Delay to Customer
                 </button>
               </div>
             </form>

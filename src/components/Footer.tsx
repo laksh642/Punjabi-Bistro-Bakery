@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import { MapPin, Phone, MessageCircle, Clock, ShieldCheck, Heart } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
+import { useCustomerAuth } from '../context/CustomerAuthContext';
 import { PolicyModal } from './PolicyModal';
 import { PunjabiBistroLogo } from './PunjabiBistroLogo';
 
 export const Footer: React.FC = () => {
   const {
     businessSettings,
-    setIsTrackingOpen,
     setIsCakeStudioOpen,
     setIsIssueModalOpen,
   } = useStore();
+
+  const { setIsMyOrdersOpen } = useCustomerAuth();
 
   const [activePolicy, setActivePolicy] = useState<'delivery' | 'refund' | 'eggless' | 'privacy' | null>(null);
 
@@ -119,10 +121,10 @@ export const Footer: React.FC = () => {
               <ul className="space-y-2 text-xs text-emerald-100/75">
                 <li>
                   <button
-                    onClick={() => setIsTrackingOpen(true)}
-                    className="hover:text-amber-300 transition-colors"
+                    onClick={() => setIsMyOrdersOpen(true)}
+                    className="hover:text-amber-300 transition-colors cursor-pointer"
                   >
-                    Track Active Order
+                    My Orders
                   </button>
                 </li>
                 <li>

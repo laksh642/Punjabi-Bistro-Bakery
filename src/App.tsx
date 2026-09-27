@@ -8,7 +8,6 @@ import { MyOrdersModal } from './components/MyOrdersModal';
 import { CustomerAccountModal } from './components/CustomerAccountModal';
 import { StorefrontPage } from './pages/StorefrontPage';
 import { AdminPage } from './pages/AdminPage';
-import { OrderTrackingPage } from './pages/OrderTrackingPage';
 
 // Handles backwards-compatibility for any legacy hash links (e.g. /#/admin -> /admin)
 function HashRedirector() {
@@ -34,12 +33,12 @@ export default function App() {
             <Routes>
               <Route path="/" element={<StorefrontPage />} />
               <Route path="/admin" element={<AdminPage />} />
-              <Route path="/orders" element={<OrderTrackingPage />} />
-              <Route path="/orders/:token" element={<OrderTrackingPage />} />
-              <Route path="/tracking" element={<OrderTrackingPage />} />
-              <Route path="/tracking/:token" element={<OrderTrackingPage />} />
-              <Route path="/track" element={<OrderTrackingPage />} />
-              <Route path="/track/:token" element={<OrderTrackingPage />} />
+              <Route path="/orders" element={<Navigate to="/" replace />} />
+              <Route path="/orders/:token" element={<Navigate to="/" replace />} />
+              <Route path="/tracking" element={<Navigate to="/" replace />} />
+              <Route path="/tracking/:token" element={<Navigate to="/" replace />} />
+              <Route path="/track" element={<Navigate to="/" replace />} />
+              <Route path="/track/:token" element={<Navigate to="/" replace />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
             {/* Global Customer Modals */}

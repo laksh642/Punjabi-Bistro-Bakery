@@ -26,7 +26,7 @@ const FAQS: FAQItem[] = [
   {
     question: 'How do you handle order preparation and delivery delays?',
     answer:
-      'Because every savory dish (pastas, pizzas, wraps) is prepared fresh to order, busy kitchen hours can occasionally add a few minutes. To keep you informed, our live tracker proactively alerts you if a batch is taking extra time, and you can call or WhatsApp our counter directly anytime.',
+      'Because every savory dish (pastas, pizzas, wraps) is prepared fresh to order, busy kitchen hours can occasionally add a few minutes. To keep you informed, live order status updates in your account proactively alert you if a batch is taking extra time, and you can call or WhatsApp our counter directly anytime.',
   },
   {
     question: 'What payment methods can I use?',

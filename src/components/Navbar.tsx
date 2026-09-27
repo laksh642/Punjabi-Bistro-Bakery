@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
   Phone,
@@ -29,7 +28,6 @@ export const Navbar: React.FC = () => {
     cartItemCount,
     cartSubtotal,
     setIsCartOpen,
-    setIsTrackingOpen,
     setIsCakeStudioOpen,
     setIsIssueModalOpen,
     setIsMenuOnlyMode,
@@ -256,17 +254,6 @@ export const Navbar: React.FC = () => {
                 </button>
               )}
 
-              {/* Order Tracking Button */}
-              <button
-                id="nav-track-order-btn"
-                onClick={() => setIsTrackingOpen(true)}
-                className="hidden sm:flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-emerald-200 text-emerald-900 bg-emerald-50/50 hover:bg-emerald-100/60 transition-colors cursor-pointer"
-                title="Track Your Order"
-              >
-                <Clock className="w-3.5 h-3.5 text-emerald-700" />
-                <span>Track Order</span>
-              </button>
-
               {/* Digital QR Menu Mode */}
               <button
                 onClick={() => setIsMenuOnlyMode(true)}
@@ -281,9 +268,9 @@ export const Navbar: React.FC = () => {
               <motion.button
                 id="nav-cart-btn"
                 whileTap={{ scale: 0.95 }}
-                onClick={() => (user ? setIsCartOpen(true) : openLoginModal())}
+                onClick={() => setIsCartOpen(true)}
                 className="relative flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-xl font-medium text-xs sm:text-sm shadow-xs hover:shadow transition-all cursor-pointer"
-                title={user ? 'View Cart' : 'Sign in with Google to access Cart'}
+                title="View Cart"
               >
                 <ShoppingBag className="w-4 h-4" />
                 <span className="hidden sm:inline font-semibold">Cart</span>
@@ -413,14 +400,6 @@ export const Navbar: React.FC = () => {
                 </button>
               )}
 
-              <Link
-                to="/orders"
-                onClick={() => setMobileMenuOpen(false)}
-                className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border border-emerald-200 text-xs font-semibold text-emerald-950 hover:bg-emerald-50 transition-colors"
-              >
-                <Clock className="w-3.5 h-3.5 text-emerald-700" />
-                <span>Track Order by Token / Number</span>
-              </Link>
               <button
                 onClick={() => {
                   setMobileMenuOpen(false);

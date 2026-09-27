@@ -56,8 +56,8 @@ export const MobileBottomBar: React.FC = () => {
 
         {/* View Cart / Order button */}
         <button
-          onClick={() => (user ? setIsCartOpen(true) : openLoginModal())}
-          className="flex-1.5 py-2 px-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-center flex items-center justify-center gap-1 text-[11px] font-bold shadow-md relative"
+          onClick={() => setIsCartOpen(true)}
+          className="flex-1.5 py-2 px-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-center flex items-center justify-center gap-1 text-[11px] font-bold shadow-md relative cursor-pointer"
         >
           <ShoppingBag className="w-3.5 h-3.5" />
           <span>Cart</span>

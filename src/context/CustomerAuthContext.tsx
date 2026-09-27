@@ -14,16 +14,16 @@ interface CustomerAuthContextType {
   setIsMyOrdersOpen: (open: boolean) => void;
   isAccountModalOpen: boolean;
   setIsAccountModalOpen: (open: boolean) => void;
+  selectedOrderNumberForModal: string | null;
+  setSelectedOrderNumberForModal: (orderNum: string | null) => void;
+  openMyOrdersWithOrder: (orderNum: string) => void;
   loginWithGoogle: () => Promise<{ success: boolean; error?: string }>;
-  loginWithDemoCustomer: (demo?: { name?: string; email?: string; phone?: string; address?: string }) => void;
   logoutCustomer: () => Promise<void>;
   updateCustomerProfile: (data: Partial<CustomerProfile>) => Promise<boolean>;
   openLoginModal: () => void;
 }
 
 const CustomerAuthContext = createContext<CustomerAuthContextType | undefined>(undefined);
-
-const DEMO_USER_STORAGE_KEY = 'pb_demo_customer_user';
 
 export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -34,13 +34,19 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isMyOrdersOpen, setIsMyOrdersOpen] = useState(false);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
+  const [selectedOrderNumberForModal, setSelectedOrderNumberForModal] = useState<string | null>(null);
 
-  // Helper to load profile for a user
+  const openMyOrdersWithOrder = useCallback((orderNum: string) => {
+    setSelectedOrderNumberForModal(orderNum);
+    setIsMyOrdersOpen(true);
+  }, []);
+
+  // Helper to load or synchronize profile for an authenticated user
   const loadProfile = useCallback(async (currentUserId: string, currentUserEmail?: string, currentName?: string) => {
     try {
       let profile = await fetchCustomerProfileFromCloud(currentUserId);
       if (!profile) {
-        // Construct default profile from OAuth metadata
+        // Construct default profile from Google OAuth metadata
         profile = {
           userId: currentUserId,
           fullName: currentName || currentUserEmail?.split('@')[0] || 'Customer',
@@ -57,7 +63,7 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   }, []);
 
-  // Initialize Supabase Auth Session
+  // Initialize and synchronize Supabase Auth Session
   useEffect(() => {
     let mounted = true;
 
@@ -74,16 +80,6 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
           setIsLoading(false);
           return;
         }
-
-        // Check for local demo user if no Supabase session exists
-        const savedDemo = localStorage.getItem(DEMO_USER_STORAGE_KEY);
-        if (savedDemo && mounted) {
-          try {
-            const parsed = JSON.parse(savedDemo);
-            setUser(parsed.user);
-            setCustomerProfile(parsed.profile);
-          } catch {}
-        }
       } catch (err) {
         console.warn('Auth initialization notice:', err);
       } finally {
@@ -93,14 +89,12 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     initAuth();
 
-    // Listen for auth state changes
+    // Listen for real-time authentication changes across tabs and OAuth redirects
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       if (!mounted) return;
       if (newSession?.user) {
         setSession(newSession);
         setUser(newSession.user);
-        // Clear any demo session
-        localStorage.removeItem(DEMO_USER_STORAGE_KEY);
         const metaName =
           newSession.user.user_metadata?.full_name || newSession.user.user_metadata?.name;
         await loadProfile(newSession.user.id, newSession.user.email, metaName);
@@ -108,13 +102,62 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
         setSession(null);
         setUser(null);
         setCustomerProfile(null);
-        localStorage.removeItem(DEMO_USER_STORAGE_KEY);
       }
     });
+
+    // Cross-tab and popup storage synchronization
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key && e.key.includes('auth-token')) {
+        supabase.auth.getSession().then(({ data }) => {
+          if (data?.session?.user && mounted) {
+            setSession(data.session);
+            setUser(data.session.user);
+            const metaName =
+              data.session.user.user_metadata?.full_name ||
+              data.session.user.user_metadata?.name;
+            loadProfile(data.session.user.id, data.session.user.email, metaName);
+          }
+        });
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'SUPABASE_AUTH_COMPLETE') {
+        supabase.auth.getSession().then(({ data }) => {
+          if (data?.session?.user && mounted) {
+            setSession(data.session);
+            setUser(data.session.user);
+            const metaName =
+              data.session.user.user_metadata?.full_name ||
+              data.session.user.user_metadata?.name;
+            loadProfile(data.session.user.id, data.session.user.email, metaName);
+            setIsAuthModalOpen(false);
+          }
+        });
+      }
+    };
+    window.addEventListener('message', handleMessage);
+
+    // If current window is an OAuth redirect inside a popup, notify opener and auto-close
+    if (
+      typeof window !== 'undefined' &&
+      window.opener &&
+      (window.location.hash.includes('access_token') || window.location.search.includes('code='))
+    ) {
+      try {
+        window.opener.postMessage({ type: 'SUPABASE_AUTH_COMPLETE' }, '*');
+      } catch {}
+      setTimeout(() => {
+        try { window.close(); } catch {}
+      }, 600);
+    }
 
     return () => {
       mounted = false;
       authListener?.subscription?.unsubscribe();
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('message', handleMessage);
     };
   }, [loadProfile]);
 
@@ -129,13 +172,13 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
           skipBrowserRedirect: isIframe,
           queryParams: {
             access_type: 'offline',
-            prompt: 'consent',
+            prompt: 'select_account',
           },
         },
       });
 
       if (error) {
-        console.error('Google OAuth sign-in error:', error);
+        console.error('Google OAuth sign-in notice:', error);
         return { success: false, error: error.message };
       }
 
@@ -150,66 +193,21 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   };
 
-  /**
-   * Demo customer login helper for instant testing in sandboxes/iframes
-   * where Google OAuth redirects to external domains may be restricted.
-   */
-  const loginWithDemoCustomer = (demo?: {
-    name?: string;
-    email?: string;
-    phone?: string;
-    address?: string;
-  }) => {
-    const demoId = 'cust-demo-' + Math.random().toString(36).slice(2, 9);
-    const demoEmail = demo?.email || 'customer@punjabibistro.com';
-    const demoName = demo?.name || 'Lakshit Goyal';
-
-    const mockUser: User = {
-      id: demoId,
-      app_metadata: { provider: 'google' },
-      user_metadata: { full_name: demoName },
-      aud: 'authenticated',
-      created_at: new Date().toISOString(),
-      email: demoEmail,
-      phone: demo?.phone || '+91 98765 43210',
-      role: 'authenticated',
-      updated_at: new Date().toISOString(),
-    };
-
-    const mockProfile: CustomerProfile = {
-      userId: demoId,
-      fullName: demoName,
-      email: demoEmail,
-      phone: demo?.phone || '9876543210',
-      address: demo?.address || 'Near German Bakery, Upper Dharamkot',
-      landmark: 'Opposite Pine Forest Trail',
-      city: 'Dharamkot',
-      state: 'Himachal Pradesh',
-      pincode: '176219',
-      deliveryInstructions: 'Ring doorbell, leave outside front door if not available.',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    setUser(mockUser);
-    setCustomerProfile(mockProfile);
-    localStorage.setItem(
-      DEMO_USER_STORAGE_KEY,
-      JSON.stringify({ user: mockUser, profile: mockProfile })
-    );
-    setIsAuthModalOpen(false);
-  };
-
   const logoutCustomer = async (): Promise<void> => {
     try {
       await supabase.auth.signOut();
     } catch {}
-    localStorage.removeItem(DEMO_USER_STORAGE_KEY);
     setUser(null);
     setSession(null);
     setCustomerProfile(null);
     setIsMyOrdersOpen(false);
     setIsAccountModalOpen(false);
+
+    // Clear customer-specific orders from local cache on logout
+    try {
+      localStorage.removeItem('pb_customer_orders');
+      localStorage.removeItem('pb_customer_tokens');
+    } catch {}
   };
 
   const updateCustomerProfile = async (data: Partial<CustomerProfile>): Promise<boolean> => {
@@ -247,8 +245,10 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
         setIsMyOrdersOpen,
         isAccountModalOpen,
         setIsAccountModalOpen,
+        selectedOrderNumberForModal,
+        setSelectedOrderNumberForModal,
+        openMyOrdersWithOrder,
         loginWithGoogle,
-        loginWithDemoCustomer,
         logoutCustomer,
         updateCustomerProfile,
         openLoginModal,

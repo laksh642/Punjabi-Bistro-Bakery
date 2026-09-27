@@ -28,8 +28,6 @@ import {
   fetchOrdersFromCloud,
   saveOrderToCloud,
   updateOrderStatusInCloud,
-  fetchOrderByToken,
-  fetchOrderByNumberAndPhone,
   broadcastOrderStatus,
   generateTrackingToken,
   fetchCustomerOrdersFromCloud,
@@ -200,8 +198,6 @@ interface StoreContextType {
   setIsAdminView: (value: boolean) => void;
   isCartOpen: boolean;
   setIsCartOpen: (value: boolean) => void;
-  isTrackingOpen: boolean;
-  setIsTrackingOpen: (value: boolean) => void;
   isCakeStudioOpen: boolean;
   setIsCakeStudioOpen: (value: boolean) => void;
   isIssueModalOpen: boolean;
@@ -334,7 +330,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
   const [isAdminView, setIsAdminView] = useState<boolean>(false);
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
-  const [isTrackingOpen, setIsTrackingOpen] = useState<boolean>(false);
   const [trackingOrderNumber, setTrackingOrderNumber] = useState<string>(() => {
     try {
       const savedOrders = localStorage.getItem('pb_customer_orders');
@@ -1112,10 +1107,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       )
       .join('\n');
 
-    const trackingLink = order.trackingToken
-      ? `\n*Live Order Tracking:* ${window.location.origin}/track/${order.trackingToken}\n`
-      : '';
-
     const message = `*Punjabi Bistro & Bakery - Order #${order.orderNumber}*
 ------------------------------
 *Customer:* ${order.customerName}
@@ -1138,7 +1129,7 @@ ${order.discount > 0 ? `*Discount (${order.couponCode || 'Promo'}):* -₹${order
 *Payment Method:* ${order.paymentMethod.toUpperCase()} (${order.paymentStatus.toUpperCase()})
 ${order.upiTxnId ? `*UPI Txn ID:* ${order.upiTxnId}\n` : ''}${
   order.orderNotes ? `*Special Request:* ${order.orderNotes}\n` : ''
-}${trackingLink}
+}
 _Sent via Punjabi Bistro & Bakery Dharamkot Website_`;
 
     return `https://wa.me/${businessSettings.whatsapp}?text=${encodeURIComponent(message)}`;
@@ -1217,8 +1208,6 @@ _Sent via Punjabi Bistro & Bakery Dharamkot Website_`;
         setIsAdminView,
         isCartOpen,
         setIsCartOpen,
-        isTrackingOpen,
-        setIsTrackingOpen,
         isCakeStudioOpen,
         setIsCakeStudioOpen,
         isIssueModalOpen,

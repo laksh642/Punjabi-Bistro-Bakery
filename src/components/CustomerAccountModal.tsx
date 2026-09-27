@@ -133,7 +133,7 @@ export const CustomerAccountModal: React.FC = () => {
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 text-xs border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
-                    placeholder="e.g. Lakshit Goyal"
+                    placeholder="Enter your full name"
                     required
                   />
                 </div>

@@ -229,25 +229,44 @@ export async function fetchOrdersFromCloud(): Promise<Order[] | null> {
 
 /**
  * Persists an order to Supabase database.
- * Dual-layer high reliability:
- * 1. Fast server endpoint (/api/orders) that executes database persistence in ~300ms.
- * 2. Resilient direct-client fallback with timeout protection and schema column recovery.
+ * Dual-layer high reliability with STRICT authentication:
+ * 1. Fast server endpoint (/api/orders) with Supabase session token verification.
+ * 2. Resilient direct-client fallback with RLS enforcement (auth.uid() = user_id).
  * 3. Metadata (userId, customerEmail, trackingToken) permanently embedded in items JSONB array.
  */
 export async function saveOrderToCloud(
   order: Order
 ): Promise<{ success: boolean; error?: string; order?: Order }> {
+  // STRICT: Verify customer authentication with Supabase
+  const { data: sessionData } = await supabase.auth.getSession();
+  const session = sessionData?.session;
+
+  if (!session || !session.user) {
+    return {
+      success: false,
+      error: 'Customer sign-in with Google is required to place an order.',
+    };
+  }
+
+  const authenticatedUserId = session.user.id;
+  const authenticatedEmail = session.user.email || order.customerEmail;
   const token = order.trackingToken || generateTrackingToken();
+
   const confirmedOrder: Order = {
     ...order,
+    userId: authenticatedUserId,
+    customerEmail: authenticatedEmail,
     trackingToken: token,
   };
 
-  // Primary: Attempt fast server-side persistence via /api/orders
+  // Primary: Attempt fast server-side persistence via /api/orders with Bearer token
   try {
     const serverPromise = fetch('/api/orders', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
       body: JSON.stringify(confirmedOrder),
     });
 
@@ -259,29 +278,31 @@ export async function saveOrderToCloud(
       }
     }
   } catch (serverErr) {
-    console.warn('Server /api/orders attempt failed or timed out, falling back to direct client Supabase:', serverErr);
+    console.warn('Server /api/orders attempt notice:', serverErr);
   }
 
-  // Secondary Fallback: Direct Client-Side Supabase Persistence
+  // Secondary Fallback: Direct Client-Side Supabase Persistence with RLS
   try {
     // Embed metadata inside the items JSON array to preserve customer ownership & tracking
-    // permanently in the database even before dedicated columns are added.
     const itemsWithMeta = [
       ...order.items.filter((i: any) => !i || !i._meta),
       {
         _meta: {
-          userId: order.userId || null,
-          customerEmail: order.customerEmail || null,
+          userId: authenticatedUserId,
+          customerEmail: authenticatedEmail || null,
           trackingToken: token,
           orderNumber: order.orderNumber,
         },
       },
     ];
 
-    // Base payload matching guaranteed Supabase orders columns
+    // Base payload matching guaranteed Supabase orders columns with verified user_id
     const payload: Record<string, any> = {
       id: order.id,
       order_number: order.orderNumber,
+      tracking_token: token,
+      user_id: authenticatedUserId,
+      customer_email: authenticatedEmail || null,
       customer_name: order.customerName,
       customer_phone: order.customerPhone,
       order_type: order.orderType,
@@ -342,69 +363,52 @@ export async function saveOrderToCloud(
 }
 
 /**
- * Fetches all orders belonging to a specific customer.
+ * Fetches all orders belonging to the authenticated customer.
+ * STRICT: Queries strictly where user_id matches the authenticated user ID.
  */
 export async function fetchCustomerOrdersFromCloud(
   userId: string,
-  email?: string,
-  phone?: string
+  email?: string
 ): Promise<Order[]> {
-  if (!userId && !email && !phone) return [];
+  if (!userId) return [];
 
-  // 1. Primary: Server endpoint with fast relational query
-  try {
-    const params = new URLSearchParams();
-    if (userId) params.set('userId', userId);
-    if (email) params.set('email', email);
-    if (phone) params.set('phone', phone);
+  const { data: sessionData } = await supabase.auth.getSession();
+  const session = sessionData?.session;
 
-    const res = await withTimeout(fetch(`/api/customer/orders?${params.toString()}`), 5000);
-    if (res.ok) {
-      const serverOrders = await res.json();
-      if (Array.isArray(serverOrders) && serverOrders.length > 0) {
-        return serverOrders.map(mapRowToOrder);
+  // 1. Primary: Server endpoint with fast relational query and auth header
+  if (session?.access_token) {
+    try {
+      const res = await withTimeout(
+        fetch('/api/customer/orders', {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }),
+        5000
+      );
+      if (res.ok) {
+        const serverOrders = await res.json();
+        if (Array.isArray(serverOrders) && serverOrders.length > 0) {
+          return serverOrders.map(mapRowToOrder);
+        }
       }
+    } catch (serverErr) {
+      console.warn('Customer orders server query notice:', serverErr);
     }
-  } catch (serverErr) {
-    console.warn('Customer orders server query notice:', serverErr);
   }
 
-  // 2. Secondary: Direct client Supabase query with timeout
+  // 2. Secondary: Direct client Supabase query strictly scoped to this user's ID
   try {
     const queryPromise = supabase
       .from('orders')
       .select('*')
+      .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
     const { data: allData, error: allErr } = (await withTimeout(queryPromise as any, 7000)) as any;
 
     if (!allErr && Array.isArray(allData)) {
-      const cleanEmail = (email || '').trim().toLowerCase();
-      const cleanPhone = (phone || '').replace(/\D/g, '');
-
-      const matched = allData.filter((row: any) => {
-        if (userId && row.user_id === userId) return true;
-        if (cleanEmail && row.customer_email && row.customer_email.toLowerCase() === cleanEmail) return true;
-
-        if (Array.isArray(row.items)) {
-          const meta = row.items.find((i: any) => i && i._meta)?._meta;
-          if (meta) {
-            if (userId && meta.userId === userId) return true;
-            if (cleanEmail && meta.customerEmail && meta.customerEmail.toLowerCase() === cleanEmail) return true;
-          }
-        }
-
-        if (cleanPhone.length >= 10) {
-          const dbPhone = String(row.customer_phone || '').replace(/\D/g, '');
-          if (dbPhone && (dbPhone === cleanPhone || dbPhone.endsWith(cleanPhone) || cleanPhone.endsWith(dbPhone))) {
-            return true;
-          }
-        }
-
-        return false;
-      });
-
-      return matched.map(mapRowToOrder);
+      return allData.map(mapRowToOrder);
     }
 
     return [];
@@ -426,12 +430,12 @@ export async function fetchCustomerProfileFromCloud(
     const { data, error } = await supabase
       .from('customer_profiles')
       .select('*')
-      .eq('user_id', userId)
+      .or(`user_id.eq.${userId},id.eq.${userId}`)
       .maybeSingle();
 
     if (!error && data) {
       return {
-        userId: data.user_id,
+        userId: data.user_id || data.id,
         fullName: data.full_name || '',
         email: data.email || '',
         phone: data.phone || '',
@@ -473,7 +477,8 @@ export async function saveCustomerProfileToCloud(
   } catch {}
 
   try {
-    const payload = {
+    const payload: Record<string, any> = {
+      id: profile.userId,
       user_id: profile.userId,
       full_name: profile.fullName,
       email: profile.email,
@@ -487,9 +492,18 @@ export async function saveCustomerProfileToCloud(
       updated_at: new Date().toISOString(),
     };
 
-    const { error } = await supabase
+    // Try upserting with id first
+    let { error } = await supabase
       .from('customer_profiles')
-      .upsert(payload, { onConflict: 'user_id' });
+      .upsert(payload, { onConflict: 'id' });
+
+    if (error && error.message.includes('user_id')) {
+      delete payload.id;
+      const res = await supabase
+        .from('customer_profiles')
+        .upsert(payload, { onConflict: 'user_id' });
+      error = res.error;
+    }
 
     if (!error) return true;
     console.warn('saveCustomerProfileToCloud notice:', error.message);

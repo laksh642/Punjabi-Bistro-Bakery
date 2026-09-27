@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS public.orders (
   id TEXT PRIMARY KEY,
   order_number TEXT UNIQUE NOT NULL,
   tracking_token TEXT UNIQUE NOT NULL DEFAULT md5(random()::text || clock_timestamp()::text),
+  user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  customer_email TEXT,
   customer_name TEXT NOT NULL,
   customer_phone TEXT NOT NULL,
   order_type TEXT NOT NULL DEFAULT 'delivery',
@@ -40,13 +42,40 @@ CREATE TABLE IF NOT EXISTS public.orders (
   delay_message TEXT
 );
 
--- Schema Migration: Ensure tracking_token column and performance indexes exist
+-- Schema Migration: Ensure user_id, customer_email, tracking_token column and performance indexes exist
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS customer_email TEXT;
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS tracking_token TEXT;
 UPDATE public.orders SET tracking_token = md5(random()::text || id || clock_timestamp()::text) WHERE tracking_token IS NULL;
 ALTER TABLE public.orders ALTER COLUMN tracking_token SET DEFAULT md5(random()::text || clock_timestamp()::text);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_tracking_token ON public.orders (tracking_token);
 CREATE INDEX IF NOT EXISTS idx_orders_order_number ON public.orders (order_number);
+CREATE INDEX IF NOT EXISTS idx_orders_user_id ON public.orders (user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_customer_phone ON public.orders (customer_phone);
+
+-- 1b. Customer Profiles Table (Persistent Google Account Records)
+CREATE TABLE IF NOT EXISTS public.customer_profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  user_id UUID UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  full_name TEXT,
+  avatar_url TEXT,
+  phone TEXT,
+  address TEXT,
+  landmark TEXT,
+  city TEXT DEFAULT 'Dharamkot',
+  state TEXT DEFAULT 'Himachal Pradesh',
+  pincode TEXT DEFAULT '176219',
+  delivery_instructions TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Schema Migration for customer_profiles
+ALTER TABLE public.customer_profiles ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE public.customer_profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+CREATE INDEX IF NOT EXISTS idx_customer_profiles_user_id ON public.customer_profiles (user_id);
+CREATE INDEX IF NOT EXISTS idx_customer_profiles_email ON public.customer_profiles (email);
 
 -- 2. Custom Cake Enquiries Table
 CREATE TABLE IF NOT EXISTS public.custom_cake_enquiries (
@@ -308,6 +337,7 @@ GRANT EXECUTE ON FUNCTION public.get_order_by_number_and_phone(TEXT, TEXT) TO an
 
 -- Enable Row Level Security (RLS) on all tables
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.customer_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.custom_cake_enquiries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customer_issues ENABLE ROW LEVEL SECURITY;
@@ -323,19 +353,22 @@ BEGIN
     SELECT policyname, tablename 
     FROM pg_policies 
     WHERE schemaname = 'public' 
-      AND tablename IN ('orders', 'admin_credentials', 'custom_cake_enquiries', 'customer_issues', 'reviews', 'products')
+      AND tablename IN ('orders', 'customer_profiles', 'admin_credentials', 'custom_cake_enquiries', 'customer_issues', 'reviews', 'products')
   ) LOOP
     EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', r.policyname, r.tablename);
   END LOOP;
 END $$;
 
 -- RLS: Orders Table
--- Customers can submit new orders with constrained initial fields
-CREATE POLICY "orders_public_insert"
+-- STRICT: Only authenticated customers can place orders; anonymous orders are strictly blocked.
+-- The order's user_id MUST match auth.uid(), preventing account spoofing.
+CREATE POLICY "orders_authenticated_insert"
   ON public.orders
-  FOR INSERT TO anon, authenticated
+  FOR INSERT TO authenticated
   WITH CHECK (
-    status = 'new'
+    auth.uid() IS NOT NULL
+    AND user_id = auth.uid()
+    AND status = 'new'
     AND (delay_minutes IS NULL OR delay_minutes = 0)
     AND (delay_message IS NULL OR trim(delay_message) = '')
     AND (payment_status IS NULL OR payment_status IN ('pending', 'paid'))
@@ -343,6 +376,78 @@ CREATE POLICY "orders_public_insert"
     AND length(trim(customer_name)) > 0
     AND length(trim(customer_phone)) > 0
   );
+
+-- Customers can only SELECT their own authenticated orders
+CREATE POLICY "orders_authenticated_select_own"
+  ON public.orders
+  FOR SELECT TO authenticated
+  USING (
+    auth.uid() IS NOT NULL
+    AND user_id = auth.uid()
+  );
+
+-- RLS: Customer Profiles Table
+-- Customers can only view, insert, or update their own profile linked to auth.uid()
+CREATE POLICY "customer_profiles_select_own"
+  ON public.customer_profiles
+  FOR SELECT TO authenticated
+  USING (
+    auth.uid() IS NOT NULL
+    AND user_id = auth.uid()
+  );
+
+CREATE POLICY "customer_profiles_insert_own"
+  ON public.customer_profiles
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    auth.uid() IS NOT NULL
+    AND user_id = auth.uid()
+  );
+
+CREATE POLICY "customer_profiles_update_own"
+  ON public.customer_profiles
+  FOR UPDATE TO authenticated
+  USING (
+    auth.uid() IS NOT NULL
+    AND user_id = auth.uid()
+  )
+  WITH CHECK (
+    auth.uid() IS NOT NULL
+    AND user_id = auth.uid()
+  );
+
+-- Automatic Google Account Profile Synchronization Trigger
+-- When a user authenticates via Google for the first time or updates metadata,
+-- automatically upsert their record into customer_profiles without creating duplicates.
+CREATE OR REPLACE FUNCTION public.handle_new_customer()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  INSERT INTO public.customer_profiles (id, user_id, email, full_name, avatar_url)
+  VALUES (
+    NEW.id,
+    NEW.id,
+    NEW.email,
+    COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
+    NEW.raw_user_meta_data->>'avatar_url'
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    user_id = EXCLUDED.user_id,
+    email = EXCLUDED.email,
+    full_name = COALESCE(EXCLUDED.full_name, customer_profiles.full_name),
+    avatar_url = COALESCE(EXCLUDED.avatar_url, customer_profiles.avatar_url),
+    updated_at = NOW();
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT OR UPDATE ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_customer();
 
 -- Direct selects on orders are restricted; customers use secure lookup RPCs
 -- Server backend service role bypasses RLS for admin portal operations

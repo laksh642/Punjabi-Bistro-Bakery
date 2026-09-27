@@ -40,7 +40,7 @@ export const PolicyModal: React.FC<PolicyModalProps> = ({ policyType, onClose })
           {policyType === 'delivery' && (
             <>
               <p>
-                <strong className="text-emerald-900">Delivery Timing:</strong> Normal delivery orders are dispatched within 25–40 minutes depending on kitchen queue and distance. During heavy rush hours or festival days, updates will be reflected on your live order tracker.
+                <strong className="text-emerald-900">Delivery Timing:</strong> Normal delivery orders are dispatched within 25–40 minutes depending on kitchen queue and distance. During heavy rush hours or festival days, updates will be reflected live in your order history.
               </p>
               <p>
                 <strong className="text-emerald-900">Delivery Zones & Pricing:</strong>

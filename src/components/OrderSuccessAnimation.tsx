@@ -22,8 +22,7 @@ interface OrderSuccessAnimationProps {
   error: string | null;
   onRetry: () => void;
   onClose: () => void;
-  onViewTracking: () => void;
-  onViewMyOrders?: () => void;
+  onViewMyOrder: () => void;
   onWhatsAppShare: () => void;
   userEmail?: string;
   orderType: OrderType;
@@ -47,8 +46,7 @@ export const OrderSuccessAnimation: React.FC<OrderSuccessAnimationProps> = ({
   error,
   onRetry,
   onClose,
-  onViewTracking,
-  onViewMyOrders,
+  onViewMyOrder,
   onWhatsAppShare,
   userEmail,
   orderType,
@@ -432,24 +430,13 @@ export const OrderSuccessAnimation: React.FC<OrderSuccessAnimationProps> = ({
               {/* ======================================================== */}
               <div className="space-y-2 pt-2">
                 <button
-                  onClick={onViewTracking}
+                  onClick={onViewMyOrder}
                   className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs sm:text-sm py-3 px-4 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  <Clock className="w-4 h-4 text-emerald-200" />
-                  <span>Live Order Tracker</span>
+                  <ShoppingBag className="w-4 h-4 text-emerald-200" />
+                  <span>View My Order</span>
                   <ChevronRight className="w-4 h-4 ml-auto opacity-70" />
                 </button>
-
-                {onViewMyOrders && (
-                  <button
-                    onClick={onViewMyOrders}
-                    className="w-full bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-200 font-semibold text-xs sm:text-sm py-2.5 px-4 rounded-xl shadow-2xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <ShoppingBag className="w-4 h-4 text-emerald-700" />
-                    <span>View in My Orders</span>
-                    <ChevronRight className="w-4 h-4 ml-auto opacity-70" />
-                  </button>
-                )}
 
                 <button
                   onClick={onWhatsAppShare}

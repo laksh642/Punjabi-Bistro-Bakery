@@ -41,9 +41,6 @@ export const CartDrawer: React.FC = () => {
     applyCoupon,
     removeCoupon,
     placeOrder,
-    setIsTrackingOpen,
-    setTrackingOrderNumber,
-    setTrackingToken,
     generateWhatsAppOrderUrl,
   } = useStore();
 
@@ -53,19 +50,38 @@ export const CartDrawer: React.FC = () => {
     updateCustomerProfile,
     openLoginModal,
     setIsMyOrdersOpen,
+    openMyOrdersWithOrder,
   } = useCustomerAuth();
 
-  // Checkout states
-  const [orderType, setOrderType] = useState<OrderType>('delivery');
-  const [customerName, setCustomerName] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
+  // Checkout states with draft session persistence
+  const [orderType, setOrderType] = useState<OrderType>(() => {
+    try {
+      const saved = sessionStorage.getItem('pb_draft_order_type');
+      if (saved === 'delivery' || saved === 'takeaway' || saved === 'dine_in') return saved;
+    } catch {}
+    return 'delivery';
+  });
+  const [customerName, setCustomerName] = useState(() => {
+    try { return sessionStorage.getItem('pb_draft_customer_name') || ''; } catch { return ''; }
+  });
+  const [customerPhone, setCustomerPhone] = useState(() => {
+    try { return sessionStorage.getItem('pb_draft_customer_phone') || ''; } catch { return ''; }
+  });
   const [customerEmail, setCustomerEmail] = useState('');
-  const [selectedZoneId, setSelectedZoneId] = useState<string>(deliveryZones[0]?.id || 'zone-1');
-  const [deliveryAddress, setDeliveryAddress] = useState('');
-  const [landmark, setLandmark] = useState('');
+  const [selectedZoneId, setSelectedZoneId] = useState<string>(() => {
+    try { return sessionStorage.getItem('pb_draft_zone_id') || deliveryZones[0]?.id || 'zone-1'; } catch { return deliveryZones[0]?.id || 'zone-1'; }
+  });
+  const [deliveryAddress, setDeliveryAddress] = useState(() => {
+    try { return sessionStorage.getItem('pb_draft_delivery_address') || ''; } catch { return ''; }
+  });
+  const [landmark, setLandmark] = useState(() => {
+    try { return sessionStorage.getItem('pb_draft_landmark') || ''; } catch { return ''; }
+  });
   const [tableNumber, setTableNumber] = useState('Table 4');
   const [timeSlot, setTimeSlot] = useState('asap');
-  const [orderNotes, setOrderNotes] = useState('');
+  const [orderNotes, setOrderNotes] = useState(() => {
+    try { return sessionStorage.getItem('pb_draft_order_notes') || ''; } catch { return ''; }
+  });
   const [contactlessDelivery, setContactlessDelivery] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [upiTxnId, setUpiTxnId] = useState('');
@@ -78,16 +94,44 @@ export const CartDrawer: React.FC = () => {
   const [isAnimationOpen, setIsAnimationOpen] = useState(false);
   const [animationError, setAnimationError] = useState<string | null>(null);
 
-  // Prefill customer details when profile or user changes
+  // Sync draft fields to sessionStorage
+  React.useEffect(() => {
+    try {
+      if (customerName) sessionStorage.setItem('pb_draft_customer_name', customerName);
+      if (customerPhone) sessionStorage.setItem('pb_draft_customer_phone', customerPhone);
+      if (deliveryAddress) sessionStorage.setItem('pb_draft_delivery_address', deliveryAddress);
+      if (landmark) sessionStorage.setItem('pb_draft_landmark', landmark);
+      if (orderNotes) sessionStorage.setItem('pb_draft_order_notes', orderNotes);
+      if (orderType) sessionStorage.setItem('pb_draft_order_type', orderType);
+      if (selectedZoneId) sessionStorage.setItem('pb_draft_zone_id', selectedZoneId);
+    } catch {}
+  }, [customerName, customerPhone, deliveryAddress, landmark, orderNotes, orderType, selectedZoneId]);
+
+  // Auto-advance to checkout if user completed Google login after clicking checkout
+  React.useEffect(() => {
+    if (user) {
+      try {
+        const pending = sessionStorage.getItem('pb_pending_checkout');
+        if (pending === 'true') {
+          sessionStorage.removeItem('pb_pending_checkout');
+          if (cart.length > 0) {
+            setCheckoutStep('checkout');
+          }
+        }
+      } catch {}
+    }
+  }, [user, cart.length]);
+
+  // Prefill customer details when profile or user changes (preserving any user-typed draft values)
   React.useEffect(() => {
     if (customerProfile) {
-      if (customerProfile.fullName) setCustomerName(customerProfile.fullName);
-      if (customerProfile.phone) setCustomerPhone(customerProfile.phone);
+      if (customerProfile.fullName && !customerName) setCustomerName(customerProfile.fullName);
+      if (customerProfile.phone && !customerPhone) setCustomerPhone(customerProfile.phone);
       if (customerProfile.email) setCustomerEmail(customerProfile.email);
-      if (customerProfile.address) setDeliveryAddress(customerProfile.address);
-      if (customerProfile.landmark) setLandmark(customerProfile.landmark);
+      if (customerProfile.address && !deliveryAddress) setDeliveryAddress(customerProfile.address);
+      if (customerProfile.landmark && !landmark) setLandmark(customerProfile.landmark);
     } else if (user) {
-      if (user.user_metadata?.full_name) setCustomerName(user.user_metadata.full_name);
+      if (user.user_metadata?.full_name && !customerName) setCustomerName(user.user_metadata.full_name);
       if (user.email) setCustomerEmail(user.email);
     }
   }, [customerProfile, user]);
@@ -129,18 +173,24 @@ export const CartDrawer: React.FC = () => {
   };
 
   const handleProceedToCheckout = () => {
+    if (cart.length === 0) return;
     if (!user) {
+      try {
+        sessionStorage.setItem('pb_pending_checkout', 'true');
+      } catch {}
       openLoginModal();
       return;
     }
-    if (cart.length === 0) return;
     setCheckoutStep('checkout');
   };
 
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) {
-      setErrorMessage('Please sign in with Google to place your order.');
+      setErrorMessage('Sign in with Google is required to place your order.');
+      try {
+        sessionStorage.setItem('pb_pending_checkout', 'true');
+      } catch {}
       openLoginModal();
       return;
     }
@@ -221,23 +271,12 @@ export const CartDrawer: React.FC = () => {
     setIsPlacingOrder(false);
   };
 
-  const handleViewTracking = () => {
+  const handleViewMyOrder = () => {
     if (!confirmedOrder) return;
     setIsAnimationOpen(false);
     setIsCartOpen(false);
-    setTrackingOrderNumber(confirmedOrder.orderNumber);
-    if (confirmedOrder.trackingToken) {
-      setTrackingToken(confirmedOrder.trackingToken);
-    }
-    setIsTrackingOpen(true);
     setCheckoutStep('cart');
-  };
-
-  const handleViewMyOrders = () => {
-    setIsAnimationOpen(false);
-    setIsCartOpen(false);
-    setIsMyOrdersOpen(true);
-    setCheckoutStep('cart');
+    openMyOrdersWithOrder(confirmedOrder.orderNumber);
   };
 
   const handleWhatsAppShare = () => {
@@ -278,8 +317,7 @@ export const CartDrawer: React.FC = () => {
           error={animationError}
           onRetry={handleRetryOrder}
           onClose={handleCloseAnimation}
-          onViewTracking={handleViewTracking}
-          onViewMyOrders={user ? handleViewMyOrders : undefined}
+          onViewMyOrder={handleViewMyOrder}
           onWhatsAppShare={handleWhatsAppShare}
           userEmail={user?.email}
           orderType={orderType}
@@ -309,44 +347,7 @@ export const CartDrawer: React.FC = () => {
 
         {/* Drawer Body */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5 bg-white">
-          {!user ? (
-            <div className="py-12 px-3 text-center space-y-5">
-              <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-800 flex items-center justify-center mx-auto border border-emerald-200 shadow-xs">
-                <Lock className="w-8 h-8 text-emerald-700" />
-              </div>
-              <div className="space-y-1.5">
-                <h3 className="font-serif text-lg font-bold text-emerald-950">
-                  Customer Sign In Required
-                </h3>
-                <p className="text-xs text-emerald-800/80 max-w-xs mx-auto leading-relaxed">
-                  Guests can browse all bakery products, view categories, offers, and details. To add items, customize delivery details, and place orders, please sign in with your Google account.
-                </p>
-              </div>
-              <div className="pt-2 flex flex-col items-center gap-3">
-                <button
-                  onClick={() => {
-                    setIsCartOpen(false);
-                    openLoginModal();
-                  }}
-                  className="w-full max-w-xs bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs sm:text-sm py-3 px-4 rounded-xl shadow-md transition-all flex items-center justify-center gap-2.5 cursor-pointer"
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                  </svg>
-                  <span>Sign In with Google</span>
-                </button>
-                <button
-                  onClick={() => setIsCartOpen(false)}
-                  className="text-xs text-stone-500 hover:text-stone-700 underline cursor-pointer"
-                >
-                  Continue browsing menu
-                </button>
-              </div>
-            </div>
-          ) : checkoutStep === 'cart' ? (
+          {checkoutStep === 'cart' ? (
             /* CART VIEW */
             cart.length === 0 ? (
               <div className="py-16 text-center space-y-4">
@@ -368,6 +369,19 @@ export const CartDrawer: React.FC = () => {
               </div>
             ) : (
               <>
+                {/* Guest Notice */}
+                {!user && (
+                  <div className="p-3 bg-emerald-50/90 border border-emerald-200/90 rounded-xl flex items-start gap-2.5 text-xs text-emerald-950">
+                    <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-emerald-950">Google Sign-in Required to Place Order</p>
+                      <p className="text-[11px] text-emerald-700 mt-0.5">
+                        Your cart items are saved. You will authenticate with Google when proceeding to checkout.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Cart Items List */}
                 <div className="space-y-3 divide-y divide-emerald-100">
                   {cart.map((item) => (
@@ -571,27 +585,41 @@ export const CartDrawer: React.FC = () => {
                       <p className="text-xs font-bold text-emerald-950 truncate">
                         {customerProfile?.fullName || 'Customer Account'}
                       </p>
-                      <p className="text-[10px] text-emerald-700 truncate">{user.email} • Auto-saving order</p>
+                      <p className="text-[10px] text-emerald-700 truncate">{user.email} • Verified Account</p>
                     </div>
                   </div>
                   <span className="text-[10px] bg-emerald-200/70 text-emerald-900 font-semibold px-2 py-0.5 rounded-full border border-emerald-300">
-                    Saved
+                    Verified
                   </span>
                 </div>
               ) : (
-                <div className="p-3 bg-amber-50/80 rounded-xl border border-amber-200 flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-amber-950">Have a Google Account?</p>
-                    <p className="text-[10px] text-amber-800">
-                      Sign in to auto-fill Dharamkot address & track orders.
-                    </p>
+                <div className="p-4 bg-amber-50/90 rounded-2xl border-2 border-amber-300 shadow-xs space-y-3">
+                  <div className="flex items-start gap-2.5">
+                    <ShieldCheck className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-amber-950 uppercase tracking-wide">
+                        Google Sign-in Required to Place Order
+                      </p>
+                      <p className="text-xs text-amber-900 mt-0.5 leading-relaxed">
+                        To place your order with Punjabi Bistro & Bakery, you must sign in with Google. Your cart items and entered details are preserved.
+                      </p>
+                    </div>
                   </div>
                   <button
                     type="button"
-                    onClick={openLoginModal}
-                    className="px-3 py-1.5 bg-white border border-amber-300 hover:border-emerald-600 text-stone-800 rounded-lg text-xs font-bold shadow-2xs transition-colors shrink-0 cursor-pointer"
+                    onClick={() => {
+                      try { sessionStorage.setItem('pb_pending_checkout', 'true'); } catch {}
+                      openLoginModal();
+                    }}
+                    className="w-full py-2.5 px-3 bg-white hover:bg-stone-50 border border-amber-400 hover:border-emerald-600 text-stone-800 rounded-xl text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-2.5 cursor-pointer"
                   >
-                    Sign In
+                    <svg className="w-4 h-4" viewBox="0 0 24 24">
+                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                    </svg>
+                    <span>Sign in with Google</span>
                   </button>
                 </div>
               )}
@@ -819,23 +847,42 @@ export const CartDrawer: React.FC = () => {
                 >
                   Back
                 </button>
-                <button
-                  type="submit"
-                  disabled={isPlacingOrder}
-                  className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs sm:text-sm py-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                >
-                  {isPlacingOrder ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>Sending to Bakery...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Place Bakery Order • ₹{finalTotal}</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </>
-                  )}
-                </button>
+                {user ? (
+                  <button
+                    type="submit"
+                    disabled={isPlacingOrder}
+                    className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs sm:text-sm py-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {isPlacingOrder ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>Sending to Bakery...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Place Bakery Order • ₹{finalTotal}</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try { sessionStorage.setItem('pb_pending_checkout', 'true'); } catch {}
+                      openLoginModal();
+                    }}
+                    className="flex-1 bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs sm:text-sm py-3 px-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <svg className="w-4 h-4 bg-white rounded-full p-0.5 shrink-0" viewBox="0 0 24 24">
+                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                    </svg>
+                    <span>Sign in with Google to Place Order • ₹{finalTotal}</span>
+                  </button>
+                )}
               </div>
             </form>
           ) : (
@@ -914,19 +961,11 @@ export const CartDrawer: React.FC = () => {
                   </a>
 
                   <button
-                    onClick={() => {
-                      setIsCartOpen(false);
-                      setTrackingOrderNumber(confirmedOrder.orderNumber);
-                      if (confirmedOrder.trackingToken) {
-                        setTrackingToken(confirmedOrder.trackingToken);
-                      }
-                      setIsTrackingOpen(true);
-                      setCheckoutStep('cart');
-                    }}
+                    onClick={handleViewMyOrder}
                     className="w-full bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-200 font-semibold text-xs sm:text-sm py-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer"
                   >
-                    <Clock className="w-4 h-4 text-emerald-700" />
-                    <span>Live Order Tracker</span>
+                    <ShoppingBag className="w-4 h-4 text-emerald-700" />
+                    <span>View My Order</span>
                   </button>
                 </div>
               </div>
@@ -935,7 +974,7 @@ export const CartDrawer: React.FC = () => {
         </div>
 
         {/* Drawer Sticky Footer when in Cart step */}
-        {user && checkoutStep === 'cart' && cart.length > 0 && (
+        {checkoutStep === 'cart' && cart.length > 0 && (
           <div className="p-4 bg-emerald-50/80 border-t border-emerald-200 flex items-center justify-between gap-3">
             <div>
               <span className="text-[11px] text-emerald-800 block">Total</span>
@@ -943,13 +982,29 @@ export const CartDrawer: React.FC = () => {
                 ₹{cartSubtotal - discountAmount}
               </span>
             </div>
-            <button
-              onClick={handleProceedToCheckout}
-              className="bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs sm:text-sm px-6 py-3 rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
-            >
-              <span>Proceed to Checkout</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            {user ? (
+              <button
+                onClick={handleProceedToCheckout}
+                className="bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs sm:text-sm px-6 py-3 rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+              >
+                <span>Proceed to Checkout</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                onClick={handleProceedToCheckout}
+                className="bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs sm:text-sm px-4 py-3 rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+              >
+                <svg className="w-4 h-4 bg-white rounded-full p-0.5 shrink-0" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                </svg>
+                <span>Sign in with Google to Checkout</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
           </div>
         )}
       </div>

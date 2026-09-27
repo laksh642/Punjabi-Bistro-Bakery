@@ -25,11 +25,6 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenDetails
     e.stopPropagation();
     if (!product.isAvailable) return;
 
-    if (!user) {
-      openLoginModal();
-      return;
-    }
-
     // If product has required customization options (like cake weight or pizza size), open details modal
     if (product.customizationGroups && product.customizationGroups.length > 0) {
       onOpenDetails(product);
@@ -42,10 +37,6 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenDetails
 
   const handleDecrease = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!user) {
-      openLoginModal();
-      return;
-    }
     if (cartItemsForProduct.length === 1) {
       updateCartQuantity(cartItemsForProduct[0].cartItemId, cartItemsForProduct[0].quantity - 1);
     } else if (cartItemsForProduct.length > 1) {
@@ -56,10 +47,6 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenDetails
 
   const handleIncrease = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!user) {
-      openLoginModal();
-      return;
-    }
     if (cartItemsForProduct.length === 1) {
       updateCartQuantity(cartItemsForProduct[0].cartItemId, cartItemsForProduct[0].quantity + 1);
       setJustAdded(true);
