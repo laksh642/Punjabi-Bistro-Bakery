@@ -1,149 +1,190 @@
 import React, { useState } from 'react';
-import { ShieldCheck, ArrowLeft, AlertCircle, Sparkles } from 'lucide-react';
+import { ArrowLeft, AlertCircle, Eye, EyeOff, Lock } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useAdminAuth } from '../context/AdminAuthContext';
 
-interface AdminLoginScreenProps {
-  onSignIn: () => Promise<void>;
-  authError?: string | null;
-}
+export const AdminLoginScreen: React.FC = () => {
+  const { login, authError } = useAdminAuth();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [securityKey, setSecurityKey] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showSecurityKey, setShowSecurityKey] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-export const AdminLoginScreen: React.FC<AdminLoginScreenProps> = ({ onSignIn, authError }) => {
-  const [isSigningIn, setIsSigningIn] = useState(false);
-  const [localError, setLocalError] = useState<string | null>(null);
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSubmitting) return;
 
-  const handleGoogleSignIn = async () => {
+    setIsSubmitting(true);
     try {
-      setIsSigningIn(true);
-      setLocalError(null);
-      await onSignIn();
-    } catch (err: unknown) {
-      setIsSigningIn(false);
-      setLocalError(err instanceof Error ? err.message : 'Google sign-in could not be initiated.');
+      await login(username, password, securityKey);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const displayError = authError || localError;
-
   return (
-    <div className="min-h-screen bg-gradient-to-b from-emerald-950 via-emerald-900 to-stone-900 flex flex-col justify-between py-10 px-4 sm:px-6 lg:px-8 text-white">
+    <div className="min-h-screen bg-stone-900 flex flex-col justify-between py-8 px-4 sm:px-6 lg:px-8 text-stone-100">
       {/* Top Bar */}
-      <div className="max-w-md w-full mx-auto flex items-center justify-between">
+      <header className="max-w-md w-full mx-auto flex items-center justify-between">
         <Link
           to="/"
-          className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-200 hover:text-white transition-colors bg-white/10 hover:bg-white/15 px-3.5 py-1.5 rounded-full backdrop-blur-sm"
+          id="btn-return-storefront"
+          className="inline-flex items-center gap-2 text-xs font-medium text-stone-400 hover:text-white transition-colors bg-stone-800 hover:bg-stone-700 px-3.5 py-1.5 rounded-xl"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           <span>Return to Storefront</span>
         </Link>
-        <span className="text-[11px] text-emerald-300/80 font-mono tracking-wider uppercase flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          SECURE PORTAL
+        <span className="text-[11px] text-stone-400 font-mono tracking-wider uppercase flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-emerald-400" />
+          Private Portal
         </span>
-      </div>
+      </header>
 
       {/* Main Login Card */}
-      <div className="max-w-md w-full mx-auto my-auto py-4">
-        <div className="bg-white text-stone-900 rounded-3xl shadow-2xl p-8 sm:p-10 border border-emerald-100 relative overflow-hidden">
-          {/* Top Accent Bar */}
-          <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-emerald-500 via-emerald-600 to-amber-400" />
-
-          {/* Logo & Header */}
-          <div className="text-center mb-7">
-            <div className="relative inline-block mb-3">
-              <img
-                src="/logoo.png"
-                alt="Punjabi Bistro & Bakery"
-                className="w-20 h-20 mx-auto rounded-full object-cover shadow-lg border-2 border-emerald-100"
-                onError={(e) => {
-                  (e.target as HTMLElement).style.display = 'none';
-                }}
-              />
-              <div className="absolute -bottom-1 -right-1 bg-emerald-700 text-white p-1.5 rounded-full shadow-md border-2 border-white">
-                <ShieldCheck className="w-4 h-4" />
-              </div>
+      <main className="max-w-md w-full mx-auto my-auto py-4">
+        <div className="bg-stone-800 text-stone-100 rounded-2xl shadow-xl p-8 sm:p-10 border border-stone-700 relative overflow-hidden">
+          {/* Header */}
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-stone-900 border border-stone-700 text-emerald-400 mb-4 shadow-inner">
+              <Lock className="w-5 h-5" />
             </div>
-
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold uppercase tracking-wider mb-2.5">
-              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Dharamkot HQ • Staff & Owner Access</span>
-            </div>
-
-            <h1 className="text-2xl sm:text-3xl font-bold font-serif text-emerald-950 tracking-tight">
-              Owner / Admin Portal
+            <h1 className="text-2xl font-bold font-serif text-white tracking-tight">
+              Administrator Login
             </h1>
-            <p className="text-xs text-stone-600 mt-2 max-w-xs mx-auto leading-relaxed">
-              Manage live kitchen orders, custom cake enquiries, menu pricing, and bakery operations securely.
+            <p className="text-xs text-stone-400 mt-1.5">
+              Punjabi Bistro &amp; Bakery Management
             </p>
           </div>
 
           {/* Error Banner */}
-          {displayError && (
-            <div className="mb-6 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2.5">
-              <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="font-semibold">Authentication Notice</p>
-                <p className="text-rose-700 text-[11px] mt-0.5">{displayError}</p>
-              </div>
+          {authError && (
+            <div
+              id="admin-auth-error-banner"
+              role="alert"
+              className="mb-6 p-3.5 rounded-xl bg-rose-950/80 border border-rose-800/80 text-rose-200 text-xs flex items-center gap-2.5"
+            >
+              <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+              <p className="font-medium">{authError}</p>
             </div>
           )}
 
-          {/* Google Sign-In Action */}
-          <div className="space-y-4">
-            <button
-              type="button"
-              onClick={handleGoogleSignIn}
-              disabled={isSigningIn}
-              className="w-full flex items-center justify-center gap-3 py-3.5 px-5 rounded-2xl border border-stone-200 bg-white hover:bg-stone-50 active:scale-[0.99] text-stone-800 font-semibold text-sm shadow-sm hover:shadow-md transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed group"
-            >
-              {isSigningIn ? (
-                <div className="flex items-center gap-2 text-stone-600">
-                  <div className="w-4 h-4 border-2 border-emerald-700 border-t-transparent rounded-full animate-spin" />
-                  <span>Redirecting to Google...</span>
-                </div>
-              ) : (
-                <>
-                  {/* Official Google 'G' Icon */}
-                  <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
-                    <path
-                      fill="#4285F4"
-                      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"
-                    />
-                    <path
-                      fill="#34A853"
-                      d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.25 21.36 7.31 24 12 24z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.26C.46 8.16 0 9.94 0 12s.46 3.84 1.26 5.42l4.02-3.15z"
-                    />
-                    <path
-                      fill="#EA4335"
-                      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.64 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-                    />
-                  </svg>
-                  <span className="text-stone-900 group-hover:text-emerald-950 font-medium">
-                    Continue with Google
-                  </span>
-                </>
-              )}
-            </button>
-
-            <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-100 text-center">
-              <p className="text-xs text-stone-600 font-medium">
-                Only authorized bakery staff and owner Google accounts can access this portal.
-              </p>
-              <p className="text-[11px] text-stone-400 mt-1">
-                Authorized staff gateway • Verified Google credentials
-              </p>
+          {/* Neutral Login Form */}
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+            {/* Field 1: Username */}
+            <div>
+              <label
+                htmlFor="admin-username-input"
+                className="block text-xs font-semibold text-stone-300 mb-1.5"
+              >
+                Username
+              </label>
+              <input
+                id="admin-username-input"
+                name="username"
+                type="text"
+                autoComplete="username"
+                required
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Enter username"
+                className="w-full text-sm px-3.5 py-2.5 rounded-xl border border-stone-700 bg-stone-900 text-white placeholder:text-stone-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
+              />
             </div>
-          </div>
+
+            {/* Field 2: Password */}
+            <div>
+              <label
+                htmlFor="admin-password-input"
+                className="block text-xs font-semibold text-stone-300 mb-1.5"
+              >
+                Password
+              </label>
+              <div className="relative">
+                <input
+                  id="admin-password-input"
+                  name="password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter password"
+                  className="w-full text-sm px-3.5 py-2.5 pr-10 rounded-xl border border-stone-700 bg-stone-900 text-white placeholder:text-stone-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
+                />
+                <button
+                  type="button"
+                  id="btn-toggle-password-visibility"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-200 p-1 cursor-pointer"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Field 3: Security Key (Exact label specified by user) */}
+            <div>
+              <label
+                htmlFor="admin-security-key-input"
+                className="block text-xs font-semibold text-stone-300 mb-1.5"
+              >
+                Security Key
+              </label>
+              <div className="relative">
+                <input
+                  id="admin-security-key-input"
+                  name="securityKey"
+                  type={showSecurityKey ? 'text' : 'password'}
+                  autoComplete="off"
+                  required
+                  value={securityKey}
+                  onChange={(e) => setSecurityKey(e.target.value)}
+                  placeholder="Enter security key"
+                  className="w-full text-sm px-3.5 py-2.5 pr-10 rounded-xl border border-stone-700 bg-stone-900 text-white placeholder:text-stone-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
+                />
+                <button
+                  type="button"
+                  id="btn-toggle-security-key-visibility"
+                  onClick={() => setShowSecurityKey(!showSecurityKey)}
+                  aria-label={showSecurityKey ? 'Hide security key' : 'Show security key'}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-200 p-1 cursor-pointer"
+                >
+                  {showSecurityKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Sign In Button */}
+            <div className="pt-2">
+              <button
+                type="submit"
+                id="btn-admin-sign-in"
+                disabled={isSubmitting || !username || !password || !securityKey}
+                className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-semibold text-sm shadow-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isSubmitting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Signing in...</span>
+                  </>
+                ) : (
+                  <span>Sign In</span>
+                )}
+              </button>
+            </div>
+          </form>
         </div>
-      </div>
+      </main>
 
       {/* Footer */}
-      <div className="max-w-md w-full mx-auto text-center text-xs text-emerald-300/60">
-        Punjabi Bistro & Bakery, Dharamkot • Private Operations Gateway
-      </div>
+      <footer className="max-w-md w-full mx-auto text-center text-xs text-stone-500">
+        Punjabi Bistro &amp; Bakery, Dharamkot
+      </footer>
     </div>
   );
 };
+
+export default AdminLoginScreen;

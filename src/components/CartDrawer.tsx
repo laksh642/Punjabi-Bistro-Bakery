@@ -14,9 +14,14 @@ import {
   AlertCircle,
   QrCode,
   MessageCircle,
+  User,
+  Sparkles,
+  Lock,
 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
+import { useCustomerAuth } from '../context/CustomerAuthContext';
 import { OrderType, PaymentMethod, DeliveryZone } from '../types';
+import { OrderSuccessAnimation } from './OrderSuccessAnimation';
 
 export const CartDrawer: React.FC = () => {
   const {
@@ -42,6 +47,14 @@ export const CartDrawer: React.FC = () => {
     generateWhatsAppOrderUrl,
   } = useStore();
 
+  const {
+    user,
+    customerProfile,
+    updateCustomerProfile,
+    openLoginModal,
+    setIsMyOrdersOpen,
+  } = useCustomerAuth();
+
   // Checkout states
   const [orderType, setOrderType] = useState<OrderType>('delivery');
   const [customerName, setCustomerName] = useState('');
@@ -61,6 +74,23 @@ export const CartDrawer: React.FC = () => {
   const [checkoutStep, setCheckoutStep] = useState<'cart' | 'checkout' | 'success'>('cart');
   const [confirmedOrder, setConfirmedOrder] = useState<any>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isPlacingOrder, setIsPlacingOrder] = useState(false);
+  const [isAnimationOpen, setIsAnimationOpen] = useState(false);
+  const [animationError, setAnimationError] = useState<string | null>(null);
+
+  // Prefill customer details when profile or user changes
+  React.useEffect(() => {
+    if (customerProfile) {
+      if (customerProfile.fullName) setCustomerName(customerProfile.fullName);
+      if (customerProfile.phone) setCustomerPhone(customerProfile.phone);
+      if (customerProfile.email) setCustomerEmail(customerProfile.email);
+      if (customerProfile.address) setDeliveryAddress(customerProfile.address);
+      if (customerProfile.landmark) setLandmark(customerProfile.landmark);
+    } else if (user) {
+      if (user.user_metadata?.full_name) setCustomerName(user.user_metadata.full_name);
+      if (user.email) setCustomerEmail(user.email);
+    }
+  }, [customerProfile, user]);
 
   if (!isCartOpen) return null;
 
@@ -99,12 +129,22 @@ export const CartDrawer: React.FC = () => {
   };
 
   const handleProceedToCheckout = () => {
+    if (!user) {
+      openLoginModal();
+      return;
+    }
     if (cart.length === 0) return;
     setCheckoutStep('checkout');
   };
 
-  const handlePlaceOrder = (e: React.FormEvent) => {
+  const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) {
+      setErrorMessage('Please sign in with Google to place your order.');
+      openLoginModal();
+      return;
+    }
+
     if (!customerName.trim() || !customerPhone.trim()) {
       setErrorMessage('Please enter your name and contact phone number.');
       return;
@@ -116,11 +156,18 @@ export const CartDrawer: React.FC = () => {
     }
 
     setErrorMessage(null);
+    setAnimationError(null);
+    setConfirmedOrder(null);
+    setIsPlacingOrder(true);
+    setIsAnimationOpen(true);
 
-    const newOrder = placeOrder({
+    const startTime = Date.now();
+
+    const result = await placeOrder({
+      userId: user?.id,
+      customerEmail: user?.email || customerEmail.trim() || undefined,
       customerName: customerName.trim(),
       customerPhone: customerPhone.trim(),
-      customerEmail: customerEmail.trim() || undefined,
       orderType,
       items: cart,
       subtotal: cartSubtotal,
@@ -140,12 +187,78 @@ export const CartDrawer: React.FC = () => {
       contactlessDelivery,
     });
 
-    setConfirmedOrder(newOrder);
-    setCheckoutStep('success');
+    // Ensure polished minimum transition so success animation doesn't flash unnaturally
+    const elapsed = Date.now() - startTime;
+    if (elapsed < 400) {
+      await new Promise((resolve) => setTimeout(resolve, 400 - elapsed));
+    }
+
+    setIsPlacingOrder(false);
+
+    if (!result.success || !result.order) {
+      setAnimationError(
+        result.error || 'The bakery system could not save your order. Please try again.'
+      );
+      return;
+    }
+
+    // Auto-save delivery address for logged in customer
+    if (user) {
+      updateCustomerProfile({
+        fullName: customerName.trim(),
+        phone: customerPhone.trim(),
+        address: orderType === 'delivery' ? deliveryAddress.trim() : customerProfile?.address,
+        landmark: orderType === 'delivery' ? landmark.trim() : customerProfile?.landmark,
+      }).catch(() => {});
+    }
+
+    setConfirmedOrder(result.order);
+  };
+
+  const handleRetryOrder = () => {
+    setIsAnimationOpen(false);
+    setAnimationError(null);
+    setIsPlacingOrder(false);
+  };
+
+  const handleViewTracking = () => {
+    if (!confirmedOrder) return;
+    setIsAnimationOpen(false);
+    setIsCartOpen(false);
+    setTrackingOrderNumber(confirmedOrder.orderNumber);
+    if (confirmedOrder.trackingToken) {
+      setTrackingToken(confirmedOrder.trackingToken);
+    }
+    setIsTrackingOpen(true);
+    setCheckoutStep('cart');
+  };
+
+  const handleViewMyOrders = () => {
+    setIsAnimationOpen(false);
+    setIsCartOpen(false);
+    setIsMyOrdersOpen(true);
+    setCheckoutStep('cart');
+  };
+
+  const handleWhatsAppShare = () => {
+    if (!confirmedOrder) return;
+    const url = generateWhatsAppOrderUrl(confirmedOrder);
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.click();
+  };
+
+  const handleCloseAnimation = () => {
+    setIsAnimationOpen(false);
+    setIsCartOpen(false);
+    setCheckoutStep('cart');
   };
 
   const handleClose = () => {
     setIsCartOpen(false);
+    setIsAnimationOpen(false);
     if (checkoutStep === 'success') {
       setCheckoutStep('cart');
     }
@@ -154,9 +267,25 @@ export const CartDrawer: React.FC = () => {
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-stone-950/60 backdrop-blur-xs flex justify-end animate-in fade-in duration-200">
       <div
-        className="w-full max-w-md bg-white h-full flex flex-col shadow-2xl border-l border-emerald-200 overflow-hidden"
+        className="w-full max-w-md bg-white h-full flex flex-col shadow-2xl border-l border-emerald-200 overflow-hidden relative"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Dedicated Order Submission & Success Animation Component */}
+        <OrderSuccessAnimation
+          isOpen={isAnimationOpen}
+          isProcessing={isPlacingOrder}
+          order={confirmedOrder}
+          error={animationError}
+          onRetry={handleRetryOrder}
+          onClose={handleCloseAnimation}
+          onViewTracking={handleViewTracking}
+          onViewMyOrders={user ? handleViewMyOrders : undefined}
+          onWhatsAppShare={handleWhatsAppShare}
+          userEmail={user?.email}
+          orderType={orderType}
+          businessSettings={businessSettings}
+        />
+
         {/* Drawer Header */}
         <div className="p-4 sm:p-5 bg-gradient-to-r from-emerald-900 to-[#0B2E15] text-white border-b border-emerald-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -180,7 +309,44 @@ export const CartDrawer: React.FC = () => {
 
         {/* Drawer Body */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5 bg-white">
-          {checkoutStep === 'cart' ? (
+          {!user ? (
+            <div className="py-12 px-3 text-center space-y-5">
+              <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-800 flex items-center justify-center mx-auto border border-emerald-200 shadow-xs">
+                <Lock className="w-8 h-8 text-emerald-700" />
+              </div>
+              <div className="space-y-1.5">
+                <h3 className="font-serif text-lg font-bold text-emerald-950">
+                  Customer Sign In Required
+                </h3>
+                <p className="text-xs text-emerald-800/80 max-w-xs mx-auto leading-relaxed">
+                  Guests can browse all bakery products, view categories, offers, and details. To add items, customize delivery details, and place orders, please sign in with your Google account.
+                </p>
+              </div>
+              <div className="pt-2 flex flex-col items-center gap-3">
+                <button
+                  onClick={() => {
+                    setIsCartOpen(false);
+                    openLoginModal();
+                  }}
+                  className="w-full max-w-xs bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs sm:text-sm py-3 px-4 rounded-xl shadow-md transition-all flex items-center justify-center gap-2.5 cursor-pointer"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                  </svg>
+                  <span>Sign In with Google</span>
+                </button>
+                <button
+                  onClick={() => setIsCartOpen(false)}
+                  className="text-xs text-stone-500 hover:text-stone-700 underline cursor-pointer"
+                >
+                  Continue browsing menu
+                </button>
+              </div>
+            </div>
+          ) : checkoutStep === 'cart' ? (
             /* CART VIEW */
             cart.length === 0 ? (
               <div className="py-16 text-center space-y-4">
@@ -391,6 +557,42 @@ export const CartDrawer: React.FC = () => {
                 <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 flex-shrink-0" />
                   <span>{errorMessage}</span>
+                </div>
+              )}
+
+              {/* Customer Account Indicator / Login Prompt */}
+              {user ? (
+                <div className="p-3 bg-emerald-50/90 rounded-xl border border-emerald-200/90 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-full bg-emerald-800 text-white font-bold flex items-center justify-center text-xs shrink-0 shadow-2xs">
+                      {customerProfile?.fullName?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || 'C'}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-emerald-950 truncate">
+                        {customerProfile?.fullName || 'Customer Account'}
+                      </p>
+                      <p className="text-[10px] text-emerald-700 truncate">{user.email} • Auto-saving order</p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] bg-emerald-200/70 text-emerald-900 font-semibold px-2 py-0.5 rounded-full border border-emerald-300">
+                    Saved
+                  </span>
+                </div>
+              ) : (
+                <div className="p-3 bg-amber-50/80 rounded-xl border border-amber-200 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-amber-950">Have a Google Account?</p>
+                    <p className="text-[10px] text-amber-800">
+                      Sign in to auto-fill Dharamkot address & track orders.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openLoginModal}
+                    className="px-3 py-1.5 bg-white border border-amber-300 hover:border-emerald-600 text-stone-800 rounded-lg text-xs font-bold shadow-2xs transition-colors shrink-0 cursor-pointer"
+                  >
+                    Sign In
+                  </button>
                 </div>
               )}
 
@@ -612,16 +814,27 @@ export const CartDrawer: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setCheckoutStep('cart')}
-                  className="px-4 py-3 rounded-xl border border-emerald-200 text-xs font-semibold text-emerald-900 hover:bg-emerald-50 transition-colors cursor-pointer"
+                  disabled={isPlacingOrder}
+                  className="px-4 py-3 rounded-xl border border-emerald-200 text-xs font-semibold text-emerald-900 hover:bg-emerald-50 transition-colors cursor-pointer disabled:opacity-50"
                 >
                   Back
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs sm:text-sm py-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                  disabled={isPlacingOrder}
+                  className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs sm:text-sm py-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                 >
-                  <span>Confirm Order • ₹{finalTotal}</span>
-                  <ArrowRight className="w-4 h-4" />
+                  {isPlacingOrder ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Sending to Bakery...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Place Bakery Order • ₹{finalTotal}</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -645,10 +858,24 @@ export const CartDrawer: React.FC = () => {
                 <div className="bg-emerald-50/70 rounded-2xl p-4 border border-emerald-200 text-left space-y-2">
                   <div className="flex justify-between text-xs">
                     <span className="text-emerald-800 font-medium">Order Number:</span>
-                    <span className="font-mono font-bold text-emerald-900">
+                    <span className="font-mono font-bold text-emerald-950">
                       #{confirmedOrder.orderNumber}
                     </span>
                   </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-emerald-800 font-medium">Database Status:</span>
+                    <span className="text-emerald-700 font-bold flex items-center gap-1">
+                      <ShieldCheck className="w-3.5 h-3.5" /> Saved in Cloud (Supabase)
+                    </span>
+                  </div>
+                  {confirmedOrder.customerEmail && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-emerald-800 font-medium">Linked Account:</span>
+                      <span className="text-emerald-900 font-semibold truncate max-w-[180px]">
+                        {confirmedOrder.customerEmail}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-xs">
                     <span className="text-emerald-800 font-medium">Time Slot:</span>
                     <span className="font-semibold text-emerald-950">
@@ -662,6 +889,20 @@ export const CartDrawer: React.FC = () => {
                 </div>
 
                 <div className="space-y-2 pt-2">
+                  {user && (
+                    <button
+                      onClick={() => {
+                        setIsCartOpen(false);
+                        setIsMyOrdersOpen(true);
+                        setCheckoutStep('cart');
+                      }}
+                      className="w-full bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs sm:text-sm py-3 rounded-xl flex items-center justify-center gap-2 shadow-sm transition-colors cursor-pointer"
+                    >
+                      <Clock className="w-4 h-4 text-emerald-200" />
+                      <span>View in My Orders</span>
+                    </button>
+                  )}
+
                   <a
                     href={generateWhatsAppOrderUrl(confirmedOrder)}
                     target="_blank"
@@ -694,7 +935,7 @@ export const CartDrawer: React.FC = () => {
         </div>
 
         {/* Drawer Sticky Footer when in Cart step */}
-        {checkoutStep === 'cart' && cart.length > 0 && (
+        {user && checkoutStep === 'cart' && cart.length > 0 && (
           <div className="p-4 bg-emerald-50/80 border-t border-emerald-200 flex items-center justify-between gap-3">
             <div>
               <span className="text-[11px] text-emerald-800 block">Total</span>

@@ -82,10 +82,27 @@ export interface Coupon {
   expiryDate?: string;
 }
 
+export interface CustomerProfile {
+  userId: string;
+  fullName: string;
+  email: string;
+  phone?: string;
+  address?: string;
+  landmark?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  deliveryInstructions?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface Order {
   id: string;
   orderNumber: string;
   trackingToken: string;
+  userId?: string;
+  customerEmail?: string;
   customerName: string;
   customerPhone: string;
   orderType: OrderType;

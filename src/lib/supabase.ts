@@ -1,5 +1,5 @@
 import { createClient, User, Session } from '@supabase/supabase-js';
-import { Order, CustomCakeEnquiry, ReviewItem, CustomerIssue, OrderStatus, Product, AdminUser } from '../types';
+import { Order, CustomCakeEnquiry, ReviewItem, CustomerIssue, OrderStatus, Product, CustomerProfile } from '../types';
 
 // Supabase project credentials (provided by user)
 export const SUPABASE_URL =
@@ -33,7 +33,6 @@ export interface ConnectionStatus {
     reviews: boolean;
     issues: boolean;
     products: boolean;
-    admin_users: boolean;
     storage: boolean;
   };
 }
@@ -51,24 +50,22 @@ export async function testSupabaseConnection(): Promise<ConnectionStatus> {
       reviews: false,
       issues: false,
       products: false,
-      admin_users: false,
       storage: false,
     },
   };
 
   if (!isSupabaseConfigured) {
-    result.message = 'Supabase credentials are not configured.';
+    result.message = 'Database configuration is not available.';
     return result;
   }
 
   try {
-    const [ordersRes, cakesRes, reviewsRes, issuesRes, productsRes, adminsRes] = await Promise.all([
+    const [ordersRes, cakesRes, reviewsRes, issuesRes, productsRes] = await Promise.all([
       supabase.from('orders').select('id').limit(1),
       supabase.from('custom_cake_enquiries').select('id').limit(1),
       supabase.from('reviews').select('id').limit(1),
       supabase.from('customer_issues').select('id').limit(1),
       supabase.from('products').select('id').limit(1),
-      supabase.from('admin_users').select('id').limit(1),
     ]);
 
     result.tablesStatus.orders = !ordersRes.error;
@@ -76,7 +73,6 @@ export async function testSupabaseConnection(): Promise<ConnectionStatus> {
     result.tablesStatus.reviews = !reviewsRes.error;
     result.tablesStatus.issues = !issuesRes.error;
     result.tablesStatus.products = !productsRes.error;
-    result.tablesStatus.admin_users = !adminsRes.error;
 
     // Check storage bucket
     try {
@@ -95,19 +91,18 @@ export async function testSupabaseConnection(): Promise<ConnectionStatus> {
       result.tablesStatus.reviews,
       result.tablesStatus.issues,
       result.tablesStatus.products,
-      result.tablesStatus.admin_users,
     ].filter(Boolean).length;
 
-    if (activeCount === 6) {
-      result.message = 'All database tables and admin authorization synced in Supabase cloud.';
+    if (activeCount === 5) {
+      result.message = 'All database operational tables connected.';
     } else if (activeCount > 0) {
-      result.message = `Connected (${activeCount}/6 tables ready). Click 'Setup Schema' if needed.`;
+      result.message = `Connected (${activeCount}/5 operational tables ready).`;
     } else {
-      result.message = 'Supabase reachable! Ready for initial database table creation.';
+      result.message = 'Database reachable.';
     }
   } catch (err: unknown) {
     result.connected = false;
-    result.message = err instanceof Error ? err.message : 'Failed to connect to Supabase';
+    result.message = err instanceof Error ? err.message : 'Failed to connect to database';
   }
 
   return result;
@@ -116,6 +111,34 @@ export async function testSupabaseConnection(): Promise<ConnectionStatus> {
 // -------------------------------------------------------------
 // Orders Cloud Synchronization & Secure Tracking
 // -------------------------------------------------------------
+
+/**
+ * Timeout promise wrapper to ensure Supabase and network calls never hang or block the UI indefinitely.
+ */
+async function withTimeout<T>(promise: Promise<T>, ms: number = 4000, fallback?: T): Promise<T> {
+  let timeoutHandle: any;
+  const timeoutPromise = new Promise<T>((resolve, reject) => {
+    timeoutHandle = setTimeout(() => {
+      if (fallback !== undefined) {
+        resolve(fallback);
+      } else {
+        reject(new Error(`Operation timed out after ${ms}ms`));
+      }
+    }, ms);
+  });
+
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    clearTimeout(timeoutHandle);
+    return result;
+  } catch (err) {
+    clearTimeout(timeoutHandle);
+    if (fallback !== undefined) {
+      return fallback;
+    }
+    throw err;
+  }
+}
 
 export function generateTrackingToken(): string {
   if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
@@ -127,20 +150,26 @@ export function generateTrackingToken(): string {
 }
 
 export function mapRowToOrder(row: any): Order {
+  const rawItems = Array.isArray(row.items) ? row.items : [];
+  const metaItem = rawItems.find((i: any) => i && i._meta);
+  const cleanItems = rawItems.filter((i: any) => !i || !i._meta);
+
   return {
     id: row.id,
     orderNumber: row.order_number,
-    trackingToken: row.tracking_token || '',
-    customerName: row.customer_name,
-    customerPhone: row.customer_phone,
-    orderType: row.order_type,
+    trackingToken: row.tracking_token || metaItem?._meta?.trackingToken || '',
+    userId: row.user_id || metaItem?._meta?.userId || undefined,
+    customerEmail: row.customer_email || metaItem?._meta?.customerEmail || undefined,
+    customerName: row.customer_name || 'Customer',
+    customerPhone: row.customer_phone || '',
+    orderType: row.order_type || 'delivery',
     deliveryAddress: row.delivery_address || undefined,
     landmark: row.landmark || undefined,
     zoneId: row.zone_id || undefined,
     tableNumber: row.table_number || undefined,
     timeSlot: row.time_slot || 'asap',
     scheduledDate: row.scheduled_date || new Date().toISOString().split('T')[0],
-    items: Array.isArray(row.items) ? row.items : [],
+    items: cleanItems,
     subtotal: Number(row.subtotal) || 0,
     deliveryFee: Number(row.delivery_fee) || 0,
     discount: Number(row.discount) || 0,
@@ -160,6 +189,25 @@ export function mapRowToOrder(row: any): Order {
 }
 
 export async function fetchOrdersFromCloud(): Promise<Order[] | null> {
+  const adminToken = typeof localStorage !== 'undefined' ? localStorage.getItem('pb_admin_session_token') : null;
+  if (adminToken) {
+    try {
+      const res = await fetch('/api/admin/orders', {
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          return data.map(mapRowToOrder);
+        }
+      }
+    } catch {
+      // fallback to supabase query
+    }
+  }
+
   try {
     const { data, error } = await supabase
       .from('orders')
@@ -179,13 +227,61 @@ export async function fetchOrdersFromCloud(): Promise<Order[] | null> {
   }
 }
 
-export async function saveOrderToCloud(order: Order): Promise<boolean> {
+/**
+ * Persists an order to Supabase database.
+ * Dual-layer high reliability:
+ * 1. Fast server endpoint (/api/orders) that executes database persistence in ~300ms.
+ * 2. Resilient direct-client fallback with timeout protection and schema column recovery.
+ * 3. Metadata (userId, customerEmail, trackingToken) permanently embedded in items JSONB array.
+ */
+export async function saveOrderToCloud(
+  order: Order
+): Promise<{ success: boolean; error?: string; order?: Order }> {
+  const token = order.trackingToken || generateTrackingToken();
+  const confirmedOrder: Order = {
+    ...order,
+    trackingToken: token,
+  };
+
+  // Primary: Attempt fast server-side persistence via /api/orders
   try {
-    const token = order.trackingToken || generateTrackingToken();
-    const payload = {
+    const serverPromise = fetch('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(confirmedOrder),
+    });
+
+    const res = await withTimeout(serverPromise, 5000);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success && data.order) {
+        return { success: true, order: data.order };
+      }
+    }
+  } catch (serverErr) {
+    console.warn('Server /api/orders attempt failed or timed out, falling back to direct client Supabase:', serverErr);
+  }
+
+  // Secondary Fallback: Direct Client-Side Supabase Persistence
+  try {
+    // Embed metadata inside the items JSON array to preserve customer ownership & tracking
+    // permanently in the database even before dedicated columns are added.
+    const itemsWithMeta = [
+      ...order.items.filter((i: any) => !i || !i._meta),
+      {
+        _meta: {
+          userId: order.userId || null,
+          customerEmail: order.customerEmail || null,
+          trackingToken: token,
+          orderNumber: order.orderNumber,
+        },
+      },
+    ];
+
+    // Base payload matching guaranteed Supabase orders columns
+    const payload: Record<string, any> = {
       id: order.id,
       order_number: order.orderNumber,
-      tracking_token: token,
       customer_name: order.customerName,
       customer_phone: order.customerPhone,
       order_type: order.orderType,
@@ -193,69 +289,330 @@ export async function saveOrderToCloud(order: Order): Promise<boolean> {
       landmark: order.landmark || null,
       zone_id: order.zoneId || null,
       table_number: order.tableNumber || null,
-      time_slot: order.timeSlot,
-      scheduled_date: order.scheduledDate,
-      items: order.items,
-      subtotal: order.subtotal,
-      delivery_fee: order.deliveryFee,
-      discount: order.discount,
+      time_slot: order.timeSlot || 'asap',
+      scheduled_date: order.scheduledDate || null,
+      items: itemsWithMeta,
+      subtotal: Number(order.subtotal) || 0,
+      delivery_fee: Number(order.deliveryFee) || 0,
+      discount: Number(order.discount) || 0,
       coupon_code: order.couponCode || null,
-      total: order.total,
+      total: Number(order.total) || 0,
       payment_method: order.paymentMethod,
       payment_status: order.paymentStatus,
       upi_txn_id: order.upiTxnId || null,
       status: order.status,
       order_notes: order.orderNotes || null,
-      is_no_contact_delivery: order.isNoContactDelivery || false,
-      created_at: order.createdAt,
+      is_no_contact_delivery: Boolean(order.isNoContactDelivery),
+      created_at: order.createdAt || new Date().toISOString(),
       estimated_delivery_time: order.estimatedDeliveryTime || null,
       delay_minutes: order.delayMinutes || null,
       delay_message: order.delayMessage || null,
     };
 
-    const { error } = await supabase.from('orders').upsert(payload, { onConflict: 'id' });
-    if (error) {
-      console.warn('Supabase saveOrder error:', error.message);
-      return false;
+    const maxRetries = 3;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const upsertPromise = supabase
+        .from('orders')
+        .upsert(payload, { onConflict: 'id' })
+        .select();
+
+      const { data, error } = (await withTimeout(upsertPromise as any, 7000)) as any;
+
+      if (!error) {
+        return { success: true, order: confirmedOrder };
+      }
+
+      // Check for missing column error (PGRST204)
+      const colMatch = error.message.match(/Could not find the '([^']+)' column/);
+      if (colMatch && colMatch[1] && payload.hasOwnProperty(colMatch[1])) {
+        const missingCol = colMatch[1];
+        delete payload[missingCol];
+        continue;
+      }
+
+      console.error('Supabase saveOrder direct error:', error);
+      return { success: false, error: error.message };
     }
-    return true;
-  } catch (err) {
-    console.warn('Supabase saveOrder exception:', err);
-    return false;
+
+    return { success: false, error: 'Database order insertion exceeded retries' };
+  } catch (err: any) {
+    console.error('Supabase saveOrder exception:', err);
+    return { success: false, error: err?.message || 'Network exception while saving order' };
   }
+}
+
+/**
+ * Fetches all orders belonging to a specific customer.
+ */
+export async function fetchCustomerOrdersFromCloud(
+  userId: string,
+  email?: string,
+  phone?: string
+): Promise<Order[]> {
+  if (!userId && !email && !phone) return [];
+
+  // 1. Primary: Server endpoint with fast relational query
+  try {
+    const params = new URLSearchParams();
+    if (userId) params.set('userId', userId);
+    if (email) params.set('email', email);
+    if (phone) params.set('phone', phone);
+
+    const res = await withTimeout(fetch(`/api/customer/orders?${params.toString()}`), 5000);
+    if (res.ok) {
+      const serverOrders = await res.json();
+      if (Array.isArray(serverOrders) && serverOrders.length > 0) {
+        return serverOrders.map(mapRowToOrder);
+      }
+    }
+  } catch (serverErr) {
+    console.warn('Customer orders server query notice:', serverErr);
+  }
+
+  // 2. Secondary: Direct client Supabase query with timeout
+  try {
+    const queryPromise = supabase
+      .from('orders')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    const { data: allData, error: allErr } = (await withTimeout(queryPromise as any, 7000)) as any;
+
+    if (!allErr && Array.isArray(allData)) {
+      const cleanEmail = (email || '').trim().toLowerCase();
+      const cleanPhone = (phone || '').replace(/\D/g, '');
+
+      const matched = allData.filter((row: any) => {
+        if (userId && row.user_id === userId) return true;
+        if (cleanEmail && row.customer_email && row.customer_email.toLowerCase() === cleanEmail) return true;
+
+        if (Array.isArray(row.items)) {
+          const meta = row.items.find((i: any) => i && i._meta)?._meta;
+          if (meta) {
+            if (userId && meta.userId === userId) return true;
+            if (cleanEmail && meta.customerEmail && meta.customerEmail.toLowerCase() === cleanEmail) return true;
+          }
+        }
+
+        if (cleanPhone.length >= 10) {
+          const dbPhone = String(row.customer_phone || '').replace(/\D/g, '');
+          if (dbPhone && (dbPhone === cleanPhone || dbPhone.endsWith(cleanPhone) || cleanPhone.endsWith(dbPhone))) {
+            return true;
+          }
+        }
+
+        return false;
+      });
+
+      return matched.map(mapRowToOrder);
+    }
+
+    return [];
+  } catch (err) {
+    console.warn('fetchCustomerOrdersFromCloud error:', err);
+    return [];
+  }
+}
+
+/**
+ * Fetches customer profile from Supabase customer_profiles table or local storage cache.
+ */
+export async function fetchCustomerProfileFromCloud(
+  userId: string
+): Promise<CustomerProfile | null> {
+  if (!userId) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('customer_profiles')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (!error && data) {
+      return {
+        userId: data.user_id,
+        fullName: data.full_name || '',
+        email: data.email || '',
+        phone: data.phone || '',
+        address: data.address || '',
+        landmark: data.landmark || '',
+        city: data.city || 'Dharamkot',
+        state: data.state || 'Himachal Pradesh',
+        pincode: data.pincode || '176219',
+        deliveryInstructions: data.delivery_instructions || '',
+        createdAt: data.created_at,
+        updatedAt: data.updated_at,
+      };
+    }
+  } catch (err) {
+    console.warn('fetchCustomerProfileFromCloud notice:', err);
+  }
+
+  // Fallback to local profile cache
+  try {
+    const cached = localStorage.getItem(`pb_profile_${userId}`);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+  } catch {}
+
+  return null;
+}
+
+/**
+ * Persists customer profile to Supabase customer_profiles table and local storage cache.
+ */
+export async function saveCustomerProfileToCloud(
+  profile: CustomerProfile
+): Promise<boolean> {
+  if (!profile.userId) return false;
+
+  try {
+    localStorage.setItem(`pb_profile_${profile.userId}`, JSON.stringify(profile));
+  } catch {}
+
+  try {
+    const payload = {
+      user_id: profile.userId,
+      full_name: profile.fullName,
+      email: profile.email,
+      phone: profile.phone || null,
+      address: profile.address || null,
+      landmark: profile.landmark || null,
+      city: profile.city || 'Dharamkot',
+      state: profile.state || 'Himachal Pradesh',
+      pincode: profile.pincode || '176219',
+      delivery_instructions: profile.deliveryInstructions || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from('customer_profiles')
+      .upsert(payload, { onConflict: 'user_id' });
+
+    if (!error) return true;
+    console.warn('saveCustomerProfileToCloud notice:', error.message);
+  } catch (err) {
+    console.warn('saveCustomerProfileToCloud error:', err);
+  }
+
+  return true;
 }
 
 export async function fetchOrderByToken(token: string): Promise<Order | null> {
   const cleanToken = token.trim().toLowerCase();
-  if (!cleanToken || cleanToken.length < 16) return null;
+  if (!cleanToken) return null;
 
   try {
-    // 1. Try secure RPC function (Security Definer)
-    const { data: rpcData, error: rpcError } = await supabase.rpc('get_order_by_tracking_token', {
-      p_token: cleanToken,
-    });
+    const queryWork = (async (): Promise<Order | null> => {
+      // 1. Try secure RPC function (Security Definer)
+      try {
+        const { data: rpcData, error: rpcError } = await supabase.rpc('get_order_by_tracking_token', {
+          p_token: cleanToken,
+        });
 
-    if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
-      return mapRowToOrder(rpcData[0]);
-    }
+        if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
+          return mapRowToOrder(rpcData[0]);
+        }
+      } catch {}
 
-    // 2. Direct PostgREST query fallback (if custom policy or table exposure allows)
-    const { data: directData, error: directError } = await supabase
-      .from('orders')
-      .select('*')
-      .eq('tracking_token', cleanToken)
-      .maybeSingle();
+      // 2. Direct PostgREST query fallback
+      try {
+        const { data: directData, error: directError } = await supabase
+          .from('orders')
+          .select('*')
+          .eq('tracking_token', cleanToken)
+          .maybeSingle();
 
-    if (!directError && directData) {
-      return mapRowToOrder(directData);
-    }
+        if (!directError && directData) {
+          return mapRowToOrder(directData);
+        }
+      } catch {}
 
-    if (rpcError && directError) {
-      console.warn('Supabase fetchOrderByToken query note:', rpcError.message || directError.message);
-    }
-    return null;
+      // 3. Check items _meta in recent orders
+      try {
+        const { data: allOrders, error: allErr } = await supabase
+          .from('orders')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(25);
+
+        if (!allErr && Array.isArray(allOrders)) {
+          const match = allOrders.find((row) => {
+            if (row.tracking_token?.toLowerCase() === cleanToken) return true;
+            if (Array.isArray(row.items)) {
+              const metaItem = row.items.find((it: any) => it?._meta?.trackingToken?.toLowerCase() === cleanToken);
+              if (metaItem) return true;
+            }
+            return false;
+          });
+          if (match) return mapRowToOrder(match);
+        }
+      } catch {}
+
+      return null;
+    })();
+
+    return await withTimeout(queryWork, 4000, null);
   } catch (err) {
     console.warn('Supabase fetchOrderByToken exception:', err);
+    return null;
+  }
+}
+
+export async function fetchOrderByNumber(orderNumber: string): Promise<Order | null> {
+  let cleanNum = orderNumber.trim().toUpperCase();
+  if (!cleanNum.startsWith('PB-') && cleanNum.startsWith('PB')) {
+    cleanNum = 'PB-' + cleanNum.slice(2).trim();
+  } else if (!cleanNum.startsWith('PB-') && /^\d+$/.test(cleanNum)) {
+    cleanNum = 'PB-' + cleanNum;
+  }
+  if (!cleanNum) return null;
+
+  try {
+    const queryWork = (async (): Promise<Order | null> => {
+      // 1. Direct query by order_number or id
+      try {
+        const { data: directData, error: directError } = await supabase
+          .from('orders')
+          .select('*')
+          .or(`order_number.eq.${cleanNum},id.eq.${cleanNum}`)
+          .maybeSingle();
+
+        if (!directError && directData) {
+          return mapRowToOrder(directData);
+        }
+      } catch {}
+
+      // 2. Search in recent rows (in case order_number column was stripped or in items _meta)
+      try {
+        const { data: recent, error: recentErr } = await supabase
+          .from('orders')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(30);
+
+        if (!recentErr && Array.isArray(recent)) {
+          const found = recent.find((row) => {
+            if (row.order_number?.toUpperCase() === cleanNum) return true;
+            if (row.id?.toUpperCase() === cleanNum) return true;
+            if (Array.isArray(row.items)) {
+              const metaItem = row.items.find((it: any) => it?._meta?.orderNumber?.toUpperCase() === cleanNum);
+              if (metaItem) return true;
+            }
+            return false;
+          });
+          if (found) return mapRowToOrder(found);
+        }
+      } catch {}
+
+      return null;
+    })();
+
+    return await withTimeout(queryWork, 4000, null);
+  } catch (err) {
+    console.warn('fetchOrderByNumber error:', err);
     return null;
   }
 }
@@ -275,31 +632,39 @@ export async function fetchOrderByNumberAndPhone(
   if (!cleanNum || cleanPhone.length < 7) return null;
 
   try {
-    // 1. Try secure RPC function (verifies order number AND customer phone simultaneously)
-    const { data: rpcData, error: rpcError } = await supabase.rpc('get_order_by_number_and_phone', {
-      p_order_number: cleanNum,
-      p_phone: cleanPhone,
-    });
+    const queryWork = (async (): Promise<Order | null> => {
+      // 1. Try secure RPC function (verifies order number AND customer phone simultaneously)
+      try {
+        const { data: rpcData, error: rpcError } = await supabase.rpc('get_order_by_number_and_phone', {
+          p_order_number: cleanNum,
+          p_phone: cleanPhone,
+        });
 
-    if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
-      return mapRowToOrder(rpcData[0]);
-    }
+        if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
+          return mapRowToOrder(rpcData[0]);
+        }
+      } catch {}
 
-    // 2. Direct query fallback
-    const { data: directData, error: directError } = await supabase
-      .from('orders')
-      .select('*')
-      .or(`order_number.eq.${cleanNum},id.eq.${cleanNum}`)
-      .maybeSingle();
+      // 2. Direct query fallback
+      try {
+        const { data: directData, error: directError } = await supabase
+          .from('orders')
+          .select('*')
+          .or(`order_number.eq.${cleanNum},id.eq.${cleanNum}`)
+          .maybeSingle();
 
-    if (!directError && directData) {
-      const dbPhone = String(directData.customer_phone || '').replace(/\D/g, '');
-      if (dbPhone.endsWith(cleanPhone) || cleanPhone.endsWith(dbPhone)) {
-        return mapRowToOrder(directData);
-      }
-    }
+        if (!directError && directData) {
+          const dbPhone = String(directData.customer_phone || '').replace(/\D/g, '');
+          if (dbPhone.endsWith(cleanPhone) || cleanPhone.endsWith(dbPhone)) {
+            return mapRowToOrder(directData);
+          }
+        }
+      } catch {}
 
-    return null;
+      return null;
+    })();
+
+    return await withTimeout(queryWork, 4500, null);
   } catch (err) {
     console.warn('Supabase fetchOrderByNumberAndPhone exception:', err);
     return null;
@@ -397,6 +762,35 @@ export async function updateOrderStatusInCloud(
   delayMinutes?: number,
   delayMessage?: string
 ): Promise<boolean> {
+  const adminToken = typeof localStorage !== 'undefined' ? localStorage.getItem('pb_admin_session_token') : null;
+  if (adminToken) {
+    try {
+      const res = await fetch('/api/admin/orders/status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({ orderId, status }),
+      });
+      if (res.ok) {
+        if (delayMinutes !== undefined || delayMessage !== undefined) {
+          await fetch('/api/admin/orders/delay', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${adminToken}`,
+            },
+            body: JSON.stringify({ orderId, delayMinutes, delayMessage }),
+          });
+        }
+        return true;
+      }
+    } catch {
+      // fallback
+    }
+  }
+
   try {
     const updatePayload: Record<string, unknown> = { status };
     if (delayMinutes !== undefined) updatePayload.delay_minutes = delayMinutes;
@@ -515,6 +909,23 @@ export async function updateCakeEnquiryInCloud(
   quotationAmount?: number,
   adminNotes?: string
 ): Promise<boolean> {
+  const adminToken = typeof localStorage !== 'undefined' ? localStorage.getItem('pb_admin_session_token') : null;
+  if (adminToken) {
+    try {
+      const res = await fetch('/api/admin/cakes/quote', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({ enquiryId: id, status, quotationAmount, adminNotes }),
+      });
+      if (res.ok) return true;
+    } catch {
+      // fallback
+    }
+  }
+
   try {
     const payload: Record<string, unknown> = { status };
     if (quotationAmount !== undefined) payload.quotation_amount = quotationAmount;
@@ -790,6 +1201,23 @@ export async function fetchProductsFromCloud(): Promise<Product[] | null> {
  * Save or update a product in Supabase cloud database.
  */
 export async function saveProductToCloud(product: Product): Promise<boolean> {
+  const adminToken = typeof localStorage !== 'undefined' ? localStorage.getItem('pb_admin_session_token') : null;
+  if (adminToken) {
+    try {
+      const res = await fetch('/api/admin/products', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({ product }),
+      });
+      if (res.ok) return true;
+    } catch {
+      // fallback
+    }
+  }
+
   if (!isSupabaseConfigured) return false;
   try {
     const payload = {
@@ -826,6 +1254,21 @@ export async function saveProductToCloud(product: Product): Promise<boolean> {
  * Delete a product from Supabase cloud database.
  */
 export async function deleteProductFromCloud(productId: string): Promise<boolean> {
+  const adminToken = typeof localStorage !== 'undefined' ? localStorage.getItem('pb_admin_session_token') : null;
+  if (adminToken) {
+    try {
+      const res = await fetch(`/api/admin/products/${productId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      });
+      if (res.ok) return true;
+    } catch {
+      // fallback
+    }
+  }
+
   if (!isSupabaseConfigured) return false;
   try {
     const { error } = await supabase.from('products').delete().eq('id', productId);
@@ -839,728 +1282,3 @@ export async function deleteProductFromCloud(productId: string): Promise<boolean
     return false;
   }
 }
-
-// -------------------------------------------------------------
-// Supabase Authentication & Admin Authorization (Google OAuth)
-// -------------------------------------------------------------
-
-/**
- * Sign in to the Admin Portal using Google OAuth via Supabase Auth.
- * Redirects back to /admin on the current origin (Netlify or preview).
- */
-export async function signInWithGoogle(returnPath: string = '/admin'): Promise<{ error: Error | null }> {
-  if (!isSupabaseConfigured) {
-    return { error: new Error('Supabase is not configured. Please check environment variables.') };
-  }
-
-  try {
-    const redirectUrl = `${window.location.origin}${returnPath}`;
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: redirectUrl,
-        queryParams: {
-          access_type: 'offline',
-          prompt: 'consent',
-        },
-      },
-    });
-
-    return { error: error ? new Error(error.message) : null };
-  } catch (err: unknown) {
-    return { error: err instanceof Error ? err : new Error('Failed to initiate Google OAuth') };
-  }
-}
-
-/**
- * Sign out the currently authenticated admin, terminating the Supabase session.
- */
-export async function signOutAdmin(): Promise<{ error: Error | null }> {
-  if (!isSupabaseConfigured) return { error: null };
-  try {
-    const { error } = await supabase.auth.signOut();
-    return { error: error ? new Error(error.message) : null };
-  } catch (err: unknown) {
-    return { error: err instanceof Error ? err : new Error('Failed to sign out') };
-  }
-}
-
-/**
- * Check whether an authenticated user is an authorized bakery administrator in public.admin_users.
- */
-export async function checkAdminAuthorization(userId: string): Promise<{
-  isAuthorized: boolean;
-  role: string | null;
-  adminRecord: AdminUser | null;
-  error: string | null;
-}> {
-  if (!isSupabaseConfigured || !userId) {
-    return {
-      isAuthorized: false,
-      role: null,
-      adminRecord: null,
-      error: 'Supabase not configured or missing User ID',
-    };
-  }
-
-  try {
-    const { data, error } = await supabase
-      .from('admin_users')
-      .select('id, email, role, is_active, created_at')
-      .eq('id', userId)
-      .eq('is_active', true)
-      .maybeSingle();
-
-    if (error) {
-      if (error.code === '42P01') {
-        return {
-          isAuthorized: false,
-          role: null,
-          adminRecord: null,
-          error: 'admin_users table not created yet in Supabase schema.',
-        };
-      }
-      return {
-        isAuthorized: false,
-        role: null,
-        adminRecord: null,
-        error: error.message,
-      };
-    }
-
-    if (data && data.is_active) {
-      return {
-        isAuthorized: true,
-        role: data.role || 'admin',
-        adminRecord: {
-          id: data.id,
-          email: data.email,
-          role: data.role,
-          isActive: data.is_active,
-          createdAt: data.created_at,
-        },
-        error: null,
-      };
-    }
-
-    return {
-      isAuthorized: false,
-      role: null,
-      adminRecord: null,
-      error: null,
-    };
-  } catch (err: unknown) {
-    return {
-      isAuthorized: false,
-      role: null,
-      adminRecord: null,
-      error: err instanceof Error ? err.message : 'Unknown authorization error',
-    };
-  }
-}
-
-/**
- * Fetch all registered administrators from public.admin_users (authorized admin only).
- */
-export async function fetchAdminUsers(): Promise<AdminUser[]> {
-  if (!isSupabaseConfigured) return [];
-  try {
-    const { data, error } = await supabase
-      .from('admin_users')
-      .select('*')
-      .order('created_at', { ascending: true });
-
-    if (error) {
-      console.warn('Supabase fetchAdminUsers notice:', error.message);
-      return [];
-    }
-
-    return (data || []).map((row: any) => ({
-      id: row.id,
-      email: row.email,
-      role: row.role || 'admin',
-      isActive: Boolean(row.is_active),
-      createdAt: row.created_at,
-    }));
-  } catch (err) {
-    console.warn('Supabase fetchAdminUsers error:', err);
-    return [];
-  }
-}
-
-/**
- * Add or update an administrator in public.admin_users.
- */
-export async function saveAdminUser(admin: {
-  id: string;
-  email: string;
-  role?: 'owner' | 'admin' | 'manager';
-  isActive?: boolean;
-}): Promise<boolean> {
-  if (!isSupabaseConfigured) return false;
-  try {
-    const payload = {
-      id: admin.id,
-      email: admin.email,
-      role: admin.role || 'admin',
-      is_active: admin.isActive !== undefined ? admin.isActive : true,
-    };
-
-    const { error } = await supabase.from('admin_users').upsert(payload, { onConflict: 'id' });
-    if (error) {
-      console.warn('Supabase saveAdminUser error:', error.message);
-      return false;
-    }
-    return true;
-  } catch (err) {
-    console.warn('Supabase saveAdminUser error:', err);
-    return false;
-  }
-}
-
-/**
- * Delete or revoke an administrator in public.admin_users.
- */
-export async function deleteAdminUser(adminId: string): Promise<boolean> {
-  if (!isSupabaseConfigured) return false;
-  try {
-    const { error } = await supabase.from('admin_users').delete().eq('id', adminId);
-    return !error;
-  } catch {
-    return false;
-  }
-}
-
-export const SUPABASE_SETUP_SQL = `-- ==========================================================
--- Punjabi Bistro & Bakery, Dharamkot
--- Supabase Database Schema, Storage & Google OAuth RLS Security
--- ==========================================================
-
--- 1. Orders Table
-CREATE TABLE IF NOT EXISTS public.orders (
-  id TEXT PRIMARY KEY,
-  order_number TEXT UNIQUE NOT NULL,
-  tracking_token TEXT UNIQUE NOT NULL DEFAULT md5(random()::text || clock_timestamp()::text),
-  customer_name TEXT NOT NULL,
-  customer_phone TEXT NOT NULL,
-  order_type TEXT NOT NULL DEFAULT 'delivery',
-  delivery_address TEXT,
-  landmark TEXT,
-  zone_id TEXT,
-  table_number TEXT,
-  time_slot TEXT DEFAULT 'asap',
-  scheduled_date TEXT,
-  items JSONB NOT NULL DEFAULT '[]'::jsonb,
-  subtotal NUMERIC NOT NULL,
-  delivery_fee NUMERIC DEFAULT 0,
-  discount NUMERIC DEFAULT 0,
-  coupon_code TEXT,
-  total NUMERIC NOT NULL,
-  payment_method TEXT DEFAULT 'cod',
-  payment_status TEXT DEFAULT 'pending',
-  upi_txn_id TEXT,
-  status TEXT NOT NULL DEFAULT 'new',
-  order_notes TEXT,
-  is_no_contact_delivery BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  estimated_delivery_time TEXT,
-  delay_minutes INTEGER,
-  delay_message TEXT
-);
-
--- Schema Migration: Add tracking_token column if missing and create indexes
-ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS tracking_token TEXT;
-UPDATE public.orders SET tracking_token = md5(random()::text || id || clock_timestamp()::text) WHERE tracking_token IS NULL;
-ALTER TABLE public.orders ALTER COLUMN tracking_token SET DEFAULT md5(random()::text || clock_timestamp()::text);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_tracking_token ON public.orders (tracking_token);
-CREATE INDEX IF NOT EXISTS idx_orders_order_number ON public.orders (order_number);
-CREATE INDEX IF NOT EXISTS idx_orders_customer_phone ON public.orders (customer_phone);
-
--- 2. Custom Cake Enquiries Table
-CREATE TABLE IF NOT EXISTS public.custom_cake_enquiries (
-  id TEXT PRIMARY KEY,
-  enquiry_number TEXT UNIQUE NOT NULL,
-  customer_name TEXT NOT NULL,
-  customer_phone TEXT NOT NULL,
-  customer_whatsapp TEXT NOT NULL,
-  occasion TEXT NOT NULL,
-  event_date TEXT NOT NULL,
-  preferred_time TEXT,
-  servings TEXT,
-  weight_kg NUMERIC NOT NULL,
-  flavour TEXT NOT NULL,
-  shape TEXT DEFAULT 'Round',
-  theme_description TEXT,
-  color_preference TEXT,
-  message_on_cake TEXT,
-  is_eggless BOOLEAN DEFAULT TRUE,
-  reference_image TEXT,
-  approximate_budget NUMERIC,
-  additional_notes TEXT,
-  status TEXT NOT NULL DEFAULT 'enquiry_received',
-  quotation_amount NUMERIC,
-  admin_notes TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- 3. Customer Reviews Table
-CREATE TABLE IF NOT EXISTS public.reviews (
-  id TEXT PRIMARY KEY,
-  author TEXT NOT NULL,
-  rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
-  date TEXT,
-  text TEXT NOT NULL,
-  category TEXT DEFAULT 'Food',
-  verified_customer BOOLEAN DEFAULT FALSE,
-  owner_reply TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- 4. Customer Issues & Late Delivery Reports Table
-CREATE TABLE IF NOT EXISTS public.customer_issues (
-  id TEXT PRIMARY KEY,
-  order_number TEXT NOT NULL,
-  customer_phone TEXT NOT NULL,
-  customer_name TEXT NOT NULL,
-  issue_type TEXT NOT NULL,
-  description TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'open',
-  resolution_notes TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- 5. Products Table (Menu Items & Live Pricing)
-CREATE TABLE IF NOT EXISTS public.products (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  category_id TEXT NOT NULL,
-  category_name TEXT NOT NULL,
-  description TEXT DEFAULT '',
-  price NUMERIC NOT NULL,
-  original_price NUMERIC,
-  image TEXT NOT NULL,
-  is_available BOOLEAN DEFAULT TRUE,
-  is_bestseller BOOLEAN DEFAULT FALSE,
-  is_eggless BOOLEAN DEFAULT TRUE,
-  is_vegetarian BOOLEAN DEFAULT TRUE,
-  is_spicy BOOLEAN DEFAULT FALSE,
-  prep_time_minutes INTEGER DEFAULT 20,
-  customization_groups JSONB DEFAULT '[]'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- 6. Authorized Admin Users Allowlist Table
-CREATE TABLE IF NOT EXISTS public.admin_users (
-  id UUID PRIMARY KEY,
-  email TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'admin',
-  is_active BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- Revoke all table-level access on admin_users from anonymous users
-REVOKE ALL ON TABLE public.admin_users FROM anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.admin_users TO authenticated;
-
--- 7. Hardened Security Definer Helper Functions for RLS
--- Checks if current calling session (auth.uid()) is an active administrator
-CREATE OR REPLACE FUNCTION public.is_admin()
-RETURNS BOOLEAN
-LANGUAGE sql
-SECURITY DEFINER
-STABLE
-SET search_path = public, pg_temp
-AS $$
-  SELECT EXISTS (
-    SELECT 1 
-    FROM public.admin_users 
-    WHERE id = auth.uid() 
-      AND is_active = true
-  );
-$$;
-
-REVOKE EXECUTE ON FUNCTION public.is_admin() FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
-
--- Checks if current calling session (auth.uid()) is an active owner or super_admin
-CREATE OR REPLACE FUNCTION public.is_admin_owner()
-RETURNS BOOLEAN
-LANGUAGE sql
-SECURITY DEFINER
-STABLE
-SET search_path = public, pg_temp
-AS $$
-  SELECT EXISTS (
-    SELECT 1 
-    FROM public.admin_users 
-    WHERE id = auth.uid() 
-      AND role IN ('owner', 'super_admin')
-      AND is_active = true
-  );
-$$;
-
-REVOKE EXECUTE ON FUNCTION public.is_admin_owner() FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.is_admin_owner() TO authenticated;
-
--- 7b. Secure Order Lookup by Cryptographic Tracking Token
--- Exposes ONLY customer-safe fields; excludes internal tokens, payment transaction IDs, and customer phone
-CREATE OR REPLACE FUNCTION public.get_order_by_tracking_token(p_token TEXT)
-RETURNS TABLE (
-  id TEXT,
-  order_number TEXT,
-  tracking_token TEXT,
-  customer_name TEXT,
-  order_type TEXT,
-  delivery_address TEXT,
-  landmark TEXT,
-  table_number TEXT,
-  time_slot TEXT,
-  scheduled_date TEXT,
-  items JSONB,
-  subtotal NUMERIC,
-  delivery_fee NUMERIC,
-  discount NUMERIC,
-  coupon_code TEXT,
-  total NUMERIC,
-  payment_method TEXT,
-  payment_status TEXT,
-  status TEXT,
-  created_at TIMESTAMPTZ,
-  estimated_delivery_time TEXT,
-  delay_minutes INTEGER,
-  delay_message TEXT
-)
-LANGUAGE plpgsql
-SECURITY DEFINER
-STABLE
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-  v_token TEXT;
-BEGIN
-  v_token := trim(p_token);
-  IF v_token IS NULL OR length(v_token) < 16 THEN
-    RETURN;
-  END IF;
-
-  RETURN QUERY
-  SELECT
-    o.id,
-    o.order_number,
-    o.tracking_token,
-    o.customer_name,
-    o.order_type,
-    o.delivery_address,
-    o.landmark,
-    o.table_number,
-    o.time_slot,
-    o.scheduled_date,
-    o.items,
-    o.subtotal,
-    o.delivery_fee,
-    o.discount,
-    o.coupon_code,
-    o.total,
-    o.payment_method,
-    o.payment_status,
-    o.status,
-    o.created_at,
-    o.estimated_delivery_time,
-    o.delay_minutes,
-    o.delay_message
-  FROM public.orders o
-  WHERE o.tracking_token = v_token
-  LIMIT 1;
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.get_order_by_tracking_token(TEXT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.get_order_by_tracking_token(TEXT) TO anon, authenticated;
-
--- 7c. Secure Order Lookup by Order Number AND Exact Normalized Phone Verification
--- Verifies ownership without exposing full table or PII; returns at most 1 matching order
-CREATE OR REPLACE FUNCTION public.get_order_by_number_and_phone(p_order_number TEXT, p_phone TEXT)
-RETURNS TABLE (
-  id TEXT,
-  order_number TEXT,
-  tracking_token TEXT,
-  customer_name TEXT,
-  order_type TEXT,
-  delivery_address TEXT,
-  landmark TEXT,
-  table_number TEXT,
-  time_slot TEXT,
-  scheduled_date TEXT,
-  items JSONB,
-  subtotal NUMERIC,
-  delivery_fee NUMERIC,
-  discount NUMERIC,
-  coupon_code TEXT,
-  total NUMERIC,
-  payment_method TEXT,
-  payment_status TEXT,
-  status TEXT,
-  created_at TIMESTAMPTZ,
-  estimated_delivery_time TEXT,
-  delay_minutes INTEGER,
-  delay_message TEXT
-)
-LANGUAGE plpgsql
-SECURITY DEFINER
-STABLE
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-  v_clean_num TEXT;
-  v_clean_phone TEXT;
-BEGIN
-  v_clean_num := upper(trim(p_order_number));
-  IF v_clean_num ~ '^PB[0-9]+$' THEN
-    v_clean_num := 'PB-' || substring(v_clean_num FROM 3);
-  END IF;
-
-  v_clean_phone := regexp_replace(p_phone, '\D', '', 'g');
-  IF length(v_clean_phone) = 12 AND v_clean_phone LIKE '91%' THEN
-    v_clean_phone := substring(v_clean_phone FROM 3);
-  ELSIF length(v_clean_phone) = 11 AND v_clean_phone LIKE '0%' THEN
-    v_clean_phone := substring(v_clean_phone FROM 2);
-  END IF;
-
-  -- Require exact 10-digit mobile number and valid order identifier
-  IF v_clean_num = '' OR length(v_clean_phone) <> 10 THEN
-    RETURN;
-  END IF;
-
-  RETURN QUERY
-  SELECT
-    o.id,
-    o.order_number,
-    o.tracking_token,
-    o.customer_name,
-    o.order_type,
-    o.delivery_address,
-    o.landmark,
-    o.table_number,
-    o.time_slot,
-    o.scheduled_date,
-    o.items,
-    o.subtotal,
-    o.delivery_fee,
-    o.discount,
-    o.coupon_code,
-    o.total,
-    o.payment_method,
-    o.payment_status,
-    o.status,
-    o.created_at,
-    o.estimated_delivery_time,
-    o.delay_minutes,
-    o.delay_message
-  FROM public.orders o
-  WHERE (upper(trim(o.order_number)) = v_clean_num OR upper(trim(o.id)) = v_clean_num)
-    AND (
-      CASE 
-        WHEN length(regexp_replace(o.customer_phone, '\D', '', 'g')) = 12 AND regexp_replace(o.customer_phone, '\D', '', 'g') LIKE '91%'
-          THEN substring(regexp_replace(o.customer_phone, '\D', '', 'g') FROM 3)
-        WHEN length(regexp_replace(o.customer_phone, '\D', '', 'g')) = 11 AND regexp_replace(o.customer_phone, '\D', '', 'g') LIKE '0%'
-          THEN substring(regexp_replace(o.customer_phone, '\D', '', 'g') FROM 2)
-        ELSE regexp_replace(o.customer_phone, '\D', '', 'g')
-      END = v_clean_phone
-    )
-  LIMIT 1;
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.get_order_by_number_and_phone(TEXT, TEXT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.get_order_by_number_and_phone(TEXT, TEXT) TO anon, authenticated;
-
--- Enable Row Level Security (RLS) on all tables
-ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.custom_cake_enquiries ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.customer_issues ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.admin_users ENABLE ROW LEVEL SECURITY;
-
--- ==========================================================
--- RLS Policies: Storefront Public Access vs Admin Authorizations
--- ==========================================================
-
--- Clean up existing legacy policies to ensure idempotent migration
-DO $$
-DECLARE
-  r RECORD;
-BEGIN
-  FOR r IN (
-    SELECT policyname, tablename 
-    FROM pg_policies 
-    WHERE schemaname = 'public' 
-      AND tablename IN ('orders', 'admin_users', 'custom_cake_enquiries', 'customer_issues', 'reviews', 'products')
-  ) LOOP
-    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', r.policyname, r.tablename);
-  END LOOP;
-END $$;
-
--- 1. Admin Users Table RLS: Non-recursive, hardened security design
--- An authenticated user can read exclusively their own record (solves Admin Access Denied without recursion)
-CREATE POLICY "admin_users_select_self"
-  ON public.admin_users
-  FOR SELECT TO authenticated
-  USING (auth.uid() = id);
-
--- Active administrators can read the team list
-CREATE POLICY "admin_users_select_team"
-  ON public.admin_users
-  FOR SELECT TO authenticated
-  USING (public.is_admin());
-
--- Active owner or super_admin can manage admin team records
-CREATE POLICY "admin_users_manage_owner"
-  ON public.admin_users
-  FOR ALL TO authenticated
-  USING (public.is_admin_owner())
-  WITH CHECK (public.is_admin_owner());
-
--- 2. Orders Table RLS: Protected customer orders & admin operations
--- Customers can submit new orders with constrained initial fields (cannot set kitchen delays or arbitrary status)
-CREATE POLICY "orders_public_insert"
-  ON public.orders
-  FOR INSERT TO anon, authenticated
-  WITH CHECK (
-    status = 'new'
-    AND (delay_minutes IS NULL OR delay_minutes = 0)
-    AND (delay_message IS NULL OR trim(delay_message) = '')
-    AND (payment_status IS NULL OR payment_status IN ('pending', 'paid'))
-    AND total >= 0
-    AND length(trim(customer_name)) > 0
-    AND length(trim(customer_phone)) > 0
-  );
-
--- Only verified active administrators can select all orders (customers use secure RPC functions)
-CREATE POLICY "orders_admin_select"
-  ON public.orders
-  FOR SELECT TO authenticated
-  USING (public.is_admin());
-
--- Only verified active administrators can update orders (status, delays, cancellations)
-CREATE POLICY "orders_admin_update"
-  ON public.orders
-  FOR UPDATE TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-
--- Only verified active administrators can delete orders
-CREATE POLICY "orders_admin_delete"
-  ON public.orders
-  FOR DELETE TO authenticated
-  USING (public.is_admin());
-
--- 3. Custom Cake Enquiries RLS:
--- Anyone can submit cake enquiries with constrained non-privileged fields
-CREATE POLICY "cake_enquiries_public_insert"
-  ON public.custom_cake_enquiries
-  FOR INSERT TO anon, authenticated
-  WITH CHECK (
-    status IN ('enquiry_received', 'new')
-    AND quotation_amount IS NULL
-    AND admin_notes IS NULL
-    AND length(trim(customer_name)) > 0
-    AND length(trim(customer_phone)) > 0
-  );
-
--- Only active admins can select, quote, or manage custom cake enquiries
-CREATE POLICY "cake_enquiries_admin_all"
-  ON public.custom_cake_enquiries
-  FOR ALL TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-
--- 4. Customer Issues & Late Delivery Reports RLS:
--- Customers can submit issues (cannot read other customers' complaints)
-CREATE POLICY "issues_public_insert"
-  ON public.customer_issues
-  FOR INSERT TO anon, authenticated
-  WITH CHECK (
-    status = 'open'
-    AND resolution_notes IS NULL
-    AND length(trim(customer_name)) > 0
-    AND length(trim(customer_phone)) > 0
-    AND length(trim(description)) > 0
-  );
-
--- Only active admins can view and resolve customer issues
-CREATE POLICY "issues_admin_all"
-  ON public.customer_issues
-  FOR ALL TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-
--- 5. Customer Reviews Table RLS:
--- Public can view approved customer testimonials
-CREATE POLICY "reviews_public_select"
-  ON public.reviews
-  FOR SELECT TO anon, authenticated
-  USING (true);
-
--- Public can submit reviews, but cannot mark themselves as verified or add owner replies
-CREATE POLICY "reviews_public_insert"
-  ON public.reviews
-  FOR INSERT TO anon, authenticated
-  WITH CHECK (
-    (verified_customer IS NULL OR verified_customer = false)
-    AND (owner_reply IS NULL OR trim(owner_reply) = '')
-    AND rating >= 1 AND rating <= 5
-    AND length(trim(author)) > 0
-    AND length(trim(text)) > 0
-  );
-
--- Only active admins can manage reviews (owner replies, moderation)
-CREATE POLICY "reviews_admin_all"
-  ON public.reviews
-  FOR ALL TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-
--- 6. Products Table RLS:
--- Public can view menu items
-CREATE POLICY "products_public_select"
-  ON public.products
-  FOR SELECT TO anon, authenticated
-  USING (true);
-
--- Only active admins can create, update, or delete menu items
-CREATE POLICY "products_admin_all"
-  ON public.products
-  FOR ALL TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-
--- 7. Supabase Storage: Product Images Bucket Setup
-INSERT INTO storage.buckets (id, name, public) 
-VALUES ('product-images', 'product-images', true)
-ON CONFLICT (id) DO UPDATE SET public = true;
-
--- Storage Policies:
-DROP POLICY IF EXISTS "Public Access product-images" ON storage.objects;
-CREATE POLICY "Public Access product-images" ON storage.objects
-  FOR SELECT USING (bucket_id = 'product-images');
-
-DROP POLICY IF EXISTS "Admin Upload product-images" ON storage.objects;
-CREATE POLICY "Admin Upload product-images" ON storage.objects
-  FOR INSERT TO authenticated
-  WITH CHECK (bucket_id = 'product-images' AND public.is_admin());
-
-DROP POLICY IF EXISTS "Admin Update product-images" ON storage.objects;
-CREATE POLICY "Admin Update product-images" ON storage.objects
-  FOR UPDATE TO authenticated
-  USING (bucket_id = 'product-images' AND public.is_admin())
-  WITH CHECK (bucket_id = 'product-images' AND public.is_admin());
-
-DROP POLICY IF EXISTS "Admin Delete product-images" ON storage.objects;
-CREATE POLICY "Admin Delete product-images" ON storage.objects
-  FOR DELETE TO authenticated
-  USING (bucket_id = 'product-images' AND public.is_admin());
-
--- Enable Realtime publication for live order and cake updates
-ALTER PUBLICATION supabase_realtime ADD TABLE public.orders;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.custom_cake_enquiries;`;

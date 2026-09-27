@@ -32,6 +32,7 @@ import {
   fetchOrderByNumberAndPhone,
   broadcastOrderStatus,
   generateTrackingToken,
+  fetchCustomerOrdersFromCloud,
   fetchCakeEnquiriesFromCloud,
   saveCakeEnquiryToCloud,
   updateCakeEnquiryInCloud,
@@ -163,7 +164,10 @@ interface StoreContextType {
   getCustomerToken: (orderNumber: string) => string | undefined;
   saveCustomerToken: (orderNumber: string, token: string) => void;
   loadAdminOrders: () => Promise<Order[]>;
-  placeOrder: (orderData: Omit<Order, 'id' | 'orderNumber' | 'createdAt' | 'status' | 'trackingToken'>) => Order;
+  placeOrder: (
+    orderData: Omit<Order, 'id' | 'orderNumber' | 'createdAt' | 'status' | 'trackingToken'>
+  ) => Promise<{ success: boolean; order?: Order; error?: string }>;
+  syncCustomerOrders: (userId: string, email?: string) => Promise<Order[]>;
   updateOrderStatus: (orderId: string, status: OrderStatus) => void;
   delayOrder: (orderId: string, additionalMinutes: number, reason: string) => void;
   findOrder: (query: string) => Order | undefined;
@@ -795,9 +799,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   // Orders
-  const placeOrder = (
+  const placeOrder = async (
     orderData: Omit<Order, 'id' | 'orderNumber' | 'createdAt' | 'status' | 'trackingToken'>
-  ): Order => {
+  ): Promise<{ success: boolean; order?: Order; error?: string }> => {
+    if (!orderData.userId) {
+      return {
+        success: false,
+        error: 'Customer sign-in with Google is required to place an order.',
+      };
+    }
+
     const trackingToken = generateTrackingToken();
     const randomNum = Math.floor(1000 + Math.random() * 9000);
     const orderNumber = `PB-${randomNum}`;
@@ -810,21 +821,53 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       createdAt: new Date().toISOString(),
     };
 
-    // Isolate customer's own order
-    setCustomerOrders((prev) => [newOrder, ...prev]);
-    saveCustomerToken(orderNumber, trackingToken);
-    setOrders((prev) => [newOrder, ...prev]);
-    setCurrentOrder(newOrder);
-    setTrackingOrderNumber(orderNumber);
-    setTrackingToken(trackingToken);
+    // Await actual cloud database persistence in Supabase
+    const cloudResult = await saveOrderToCloud(newOrder);
+
+    if (!cloudResult.success) {
+      console.error('Failed to save order to Supabase database:', cloudResult.error);
+      return {
+        success: false,
+        error: cloudResult.error || 'Failed to save order to bakery database. Please try again.',
+      };
+    }
+
+    const confirmedOrder = cloudResult.order || newOrder;
+
+    // Only update local state, customer orders and clear cart after database confirmation
+    setCustomerOrders((prev) => [confirmedOrder, ...prev.filter((o) => o.id !== confirmedOrder.id)]);
+    saveCustomerToken(confirmedOrder.orderNumber, confirmedOrder.trackingToken);
+    setOrders((prev) => [confirmedOrder, ...prev.filter((o) => o.id !== confirmedOrder.id)]);
+    setCurrentOrder(confirmedOrder);
+    setTrackingOrderNumber(confirmedOrder.orderNumber);
+    setTrackingToken(confirmedOrder.trackingToken);
     clearCart();
 
-    // Asynchronously synchronize with Supabase Cloud
-    saveOrderToCloud(newOrder).catch((err) => {
-      console.warn('Supabase cloud order save warning:', err);
-    });
+    return { success: true, order: confirmedOrder };
+  };
 
-    return newOrder;
+  const syncCustomerOrders = async (userId: string, email?: string): Promise<Order[]> => {
+    if (!userId && !email) return customerOrders;
+    try {
+      const cloudOrders = await fetchCustomerOrdersFromCloud(userId, email);
+      if (cloudOrders && cloudOrders.length > 0) {
+        // Merge cloud orders with local customer orders, avoiding duplicates
+        setCustomerOrders((prev) => {
+          const map = new Map<string, Order>();
+          cloudOrders.forEach((o) => map.set(o.id, o));
+          prev.forEach((o) => {
+            if (!map.has(o.id)) map.set(o.id, o);
+          });
+          return Array.from(map.values()).sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+        });
+        return cloudOrders;
+      }
+    } catch (err) {
+      console.warn('syncCustomerOrders error:', err);
+    }
+    return customerOrders;
   };
 
   const updateOrderStatus = (orderId: string, status: OrderStatus) => {
@@ -1150,6 +1193,7 @@ _Sent via Punjabi Bistro & Bakery Dharamkot Website_`;
         saveCustomerToken,
         loadAdminOrders,
         placeOrder,
+        syncCustomerOrders,
         updateOrderStatus,
         delayOrder,
         findOrder,

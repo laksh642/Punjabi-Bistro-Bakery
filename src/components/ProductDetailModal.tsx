@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, Minus, Check, Clock, ShieldCheck, Flame, ShoppingBag } from 'lucide-react';
+import { X, Plus, Minus, Check, Clock, ShieldCheck, Flame, ShoppingBag, Lock } from 'lucide-react';
 import { Product, CartItemOption } from '../types';
 import { useStore } from '../context/StoreContext';
+import { useCustomerAuth } from '../context/CustomerAuthContext';
 
 interface ProductDetailModalProps {
   product: Product | null;
@@ -10,6 +11,7 @@ interface ProductDetailModalProps {
 
 export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({ product, onClose }) => {
   const { addToCart, setIsCartOpen } = useStore();
+  const { user, openLoginModal } = useCustomerAuth();
 
   const [quantity, setQuantity] = useState(1);
   const [selectedOptions, setSelectedOptions] = useState<CartItemOption[]>([]);
@@ -71,11 +73,19 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({ product,
   const totalPrice = unitPrice * quantity;
 
   const handleAddToCart = () => {
+    if (!user) {
+      openLoginModal();
+      return;
+    }
     addToCart(product, quantity, selectedOptions, specialInstructions.trim() || undefined);
     onClose();
   };
 
   const handleAddAndCheckout = () => {
+    if (!user) {
+      openLoginModal();
+      return;
+    }
     addToCart(product, quantity, selectedOptions, specialInstructions.trim() || undefined);
     onClose();
     setIsCartOpen(true);
@@ -261,8 +271,8 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({ product,
               onClick={handleAddToCart}
               className="bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs sm:text-sm px-4 sm:px-5 py-2.5 rounded-xl shadow-xs transition-all flex items-center gap-2 cursor-pointer"
             >
-              <ShoppingBag className="w-4 h-4" />
-              <span>Add to Cart • ₹{totalPrice}</span>
+              {user ? <ShoppingBag className="w-4 h-4" /> : <Lock className="w-4 h-4 text-emerald-200" />}
+              <span>{user ? `Add to Cart • ₹${totalPrice}` : `Sign In with Google to Add • ₹${totalPrice}`}</span>
             </button>
           </div>
         </div>

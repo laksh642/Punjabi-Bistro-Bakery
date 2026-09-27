@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Minus, Check, Sparkles, Heart, Flame, ShieldCheck, Clock } from 'lucide-react';
+import { Plus, Minus, Check, Sparkles, Heart, Flame, ShieldCheck, Clock, Lock } from 'lucide-react';
 import { Product } from '../types';
 import { useStore } from '../context/StoreContext';
+import { useCustomerAuth } from '../context/CustomerAuthContext';
 
 interface ProductCardProps {
   product: Product;
@@ -11,6 +12,7 @@ interface ProductCardProps {
 
 export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenDetails }) => {
   const { cart, addToCart, updateCartQuantity, favorites, toggleFavorite } = useStore();
+  const { user, openLoginModal } = useCustomerAuth();
   const [justAdded, setJustAdded] = useState(false);
 
   // Find if this product is in cart (any option)
@@ -22,6 +24,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenDetails
   const handleQuickAdd = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!product.isAvailable) return;
+
+    if (!user) {
+      openLoginModal();
+      return;
+    }
 
     // If product has required customization options (like cake weight or pizza size), open details modal
     if (product.customizationGroups && product.customizationGroups.length > 0) {
@@ -35,6 +42,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenDetails
 
   const handleDecrease = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!user) {
+      openLoginModal();
+      return;
+    }
     if (cartItemsForProduct.length === 1) {
       updateCartQuantity(cartItemsForProduct[0].cartItemId, cartItemsForProduct[0].quantity - 1);
     } else if (cartItemsForProduct.length > 1) {
@@ -45,6 +56,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenDetails
 
   const handleIncrease = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!user) {
+      openLoginModal();
+      return;
+    }
     if (cartItemsForProduct.length === 1) {
       updateCartQuantity(cartItemsForProduct[0].cartItemId, cartItemsForProduct[0].quantity + 1);
       setJustAdded(true);
@@ -212,10 +227,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenDetails
                     exit={{ scale: 0.9, opacity: 0 }}
                     whileTap={{ scale: 0.94 }}
                     onClick={handleQuickAdd}
+                    title={user ? 'Add to cart' : 'Sign in with Google to add to cart'}
                     className="bg-emerald-50 hover:bg-emerald-700 text-emerald-800 hover:text-white border border-emerald-200 hover:border-emerald-700 font-bold text-xs px-3.5 py-1.5 rounded-xl transition-all duration-200 flex items-center gap-1 shadow-xs cursor-pointer group-hover:bg-emerald-700 group-hover:text-white"
                   >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add</span>
+                    {user ? <Plus className="w-3.5 h-3.5" /> : <Lock className="w-3 h-3 text-emerald-600 group-hover:text-white" />}
+                    <span>{user ? 'Add' : 'Sign in'}</span>
                   </motion.button>
                 )}
               </AnimatePresence>

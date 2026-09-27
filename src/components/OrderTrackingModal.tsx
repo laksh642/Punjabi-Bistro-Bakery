@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   X,
   Clock,
@@ -22,6 +22,7 @@ import { useStore } from '../context/StoreContext';
 import { Order, OrderStatus } from '../types';
 import {
   fetchOrderByToken,
+  fetchOrderByNumber,
   fetchOrderByNumberAndPhone,
   subscribeToOrderUpdates,
 } from '../lib/supabase';
@@ -63,37 +64,86 @@ export const OrderTrackingModal: React.FC = () => {
   const [feedbackComments, setFeedbackComments] = useState('');
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
-  // Helper to load order via tracking token
-  const loadByToken = useCallback(
-    async (token: string) => {
-      if (!token) return;
+  // Track whether the modal has performed its initial auto-fill on open
+  const hasInitializedRef = useRef(false);
+
+  // Helper to load order via tracking token or order number
+  const loadOrderByTokenOrNumber = useCallback(
+    async (queryParam: string, tokenParam?: string) => {
+      const raw = queryParam.trim();
+      if (!raw && !tokenParam) return;
+
+      let cleanNum = raw.toUpperCase();
+      if (!cleanNum.startsWith('PB-') && /^\d+$/.test(cleanNum)) {
+        cleanNum = `PB-${cleanNum}`;
+      }
+
       setIsLoading(true);
       setErrorMessage(null);
 
       try {
+        // 1. Check if order exists in customerOrders on this device (instant!)
         const local = customerOrders.find(
-          (o) => o.trackingToken && o.trackingToken.toLowerCase() === token.toLowerCase()
+          (o) =>
+            o.orderNumber.toUpperCase() === cleanNum ||
+            o.orderNumber.toUpperCase() === raw.toUpperCase() ||
+            (tokenParam && o.trackingToken && o.trackingToken.toLowerCase() === tokenParam.toLowerCase()) ||
+            (raw.length > 16 && o.trackingToken && o.trackingToken.toLowerCase() === raw.toLowerCase())
         );
+
         if (local) {
           setCurrentOrder(local);
-          saveCustomerToken(local.orderNumber, local.trackingToken);
+          if (local.trackingToken) {
+            saveCustomerToken(local.orderNumber, local.trackingToken);
+          }
+          setNeedsPhoneVerification(false);
         }
 
-        const fresh = await fetchOrderByToken(token);
-        if (fresh) {
-          setCurrentOrder(fresh);
-          saveCustomerToken(fresh.orderNumber, fresh.trackingToken);
-          setNeedsPhoneVerification(false);
-        } else if (!local) {
-          setErrorMessage('No order found with this tracking link.');
+        // 2. If token is provided or stored, fetch fresh data via token
+        const effectiveToken =
+          tokenParam || (raw.length > 16 ? raw : undefined) || getCustomerToken(cleanNum);
+
+        if (effectiveToken) {
+          const fresh = await fetchOrderByToken(effectiveToken);
+          if (fresh) {
+            setCurrentOrder(fresh);
+            saveCustomerToken(fresh.orderNumber, fresh.trackingToken);
+            setNeedsPhoneVerification(false);
+            return;
+          }
+        }
+
+        // 3. If no token match or token not found, query cloud by order number
+        if (cleanNum) {
+          const cloudOrder = await fetchOrderByNumber(cleanNum);
+          if (cloudOrder) {
+            setCurrentOrder(cloudOrder);
+            if (cloudOrder.trackingToken) {
+              saveCustomerToken(cloudOrder.orderNumber, cloudOrder.trackingToken);
+            }
+            setNeedsPhoneVerification(false);
+            return;
+          }
+        }
+
+        // 4. If not found locally or in cloud
+        if (!local) {
+          setPendingOrderNumber(cleanNum || raw);
+          setNeedsPhoneVerification(true);
+          setErrorMessage(
+            `Order #${cleanNum || raw} was not found on this device. Please verify your phone number to view live status.`
+          );
         }
       } catch (err) {
-        console.warn('loadByToken modal error:', err);
+        console.warn('loadOrderByTokenOrNumber error:', err);
+        if (!currentOrder) {
+          setErrorMessage('Unable to retrieve order details. Please check the order number.');
+        }
       } finally {
         setIsLoading(false);
       }
     },
-    [customerOrders, saveCustomerToken]
+    [customerOrders, getCustomerToken, saveCustomerToken, currentOrder]
   );
 
   // Helper to load order by order number + phone verification
@@ -122,34 +172,35 @@ export const OrderTrackingModal: React.FC = () => {
     }
   };
 
-  // Sync initial search query when modal opens
+  // Sync initial search query ONCE when modal transitions from closed to open
   useEffect(() => {
-    if (!isTrackingOpen) return;
+    if (!isTrackingOpen) {
+      hasInitializedRef.current = false;
+      return;
+    }
 
-    setFeedbackSubmitted(false);
-    setErrorMessage(null);
+    if (!hasInitializedRef.current) {
+      hasInitializedRef.current = true;
+      setFeedbackSubmitted(false);
+      setErrorMessage(null);
 
-    if (trackingToken) {
-      setSearchQuery(trackingOrderNumber || trackingToken);
-      loadByToken(trackingToken);
-    } else if (trackingOrderNumber) {
-      setSearchQuery(trackingOrderNumber);
-      const token = getCustomerToken(trackingOrderNumber);
-      if (token) {
-        loadByToken(token);
-      } else {
-        setPendingOrderNumber(trackingOrderNumber);
-        setNeedsPhoneVerification(true);
-      }
-    } else if (customerOrders.length > 0) {
-      const latest = customerOrders[0];
-      setSearchQuery(latest.orderNumber);
-      setCurrentOrder(latest);
-      if (latest.trackingToken) {
-        loadByToken(latest.trackingToken);
+      if (trackingToken) {
+        setSearchQuery(trackingOrderNumber || trackingToken);
+        loadOrderByTokenOrNumber(trackingOrderNumber || trackingToken, trackingToken);
+      } else if (trackingOrderNumber) {
+        setSearchQuery(trackingOrderNumber);
+        const token = getCustomerToken(trackingOrderNumber);
+        loadOrderByTokenOrNumber(trackingOrderNumber, token);
+      } else if (customerOrders.length > 0) {
+        const latest = customerOrders[0];
+        setSearchQuery(latest.orderNumber);
+        setCurrentOrder(latest);
+        if (latest.trackingToken) {
+          saveCustomerToken(latest.orderNumber, latest.trackingToken);
+        }
       }
     }
-  }, [isTrackingOpen, trackingOrderNumber, trackingToken, customerOrders, getCustomerToken, loadByToken]);
+  }, [isTrackingOpen]);
 
   // Real-time updates subscription for currently tracked order
   useEffect(() => {
@@ -183,24 +234,21 @@ export const OrderTrackingModal: React.FC = () => {
   const handleTrackSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const query = searchQuery.trim();
-    if (!query) return;
-
-    setErrorMessage(null);
-
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(query);
-    if (isUuid) {
-      await loadByToken(query);
+    if (!query) {
+      setErrorMessage('Please enter an order number or tracking code.');
       return;
     }
 
-    const cleanNum = query.toUpperCase();
-    const deviceToken = getCustomerToken(cleanNum);
-    if (deviceToken) {
-      await loadByToken(deviceToken);
-    } else {
-      setPendingOrderNumber(cleanNum);
-      setNeedsPhoneVerification(true);
+    setErrorMessage(null);
+    setNeedsPhoneVerification(false);
+
+    let clean = query.toUpperCase();
+    if (!clean.startsWith('PB-') && /^\d+$/.test(clean)) {
+      clean = `PB-${clean}`;
+      setSearchQuery(clean);
     }
+
+    await loadOrderByTokenOrNumber(clean);
   };
 
   const handlePhoneVerify = async (e: React.FormEvent) => {
@@ -287,16 +335,37 @@ export const OrderTrackingModal: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Enter Order # (e.g. PB-4081) or tracking token..."
-                className="w-full pl-10 pr-3 py-2.5 bg-white border border-emerald-200 rounded-xl text-xs sm:text-sm text-emerald-950 focus:outline-none focus:border-emerald-600"
+                placeholder="Enter Order # (e.g. PB-6991) or tracking token..."
+                className="w-full pl-10 pr-9 py-2.5 bg-white border border-emerald-200 rounded-xl text-xs sm:text-sm text-emerald-950 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20"
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setErrorMessage(null);
+                    setNeedsPhoneVerification(false);
+                  }}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-stone-400 hover:text-stone-700 transition-colors rounded-full cursor-pointer"
+                  title="Clear order number"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
             <button
               type="submit"
               disabled={isLoading}
-              className="bg-emerald-700 text-white font-semibold text-xs px-4 py-2.5 rounded-xl hover:bg-emerald-800 transition-colors cursor-pointer flex items-center gap-1.5"
+              className="bg-emerald-700 text-white font-semibold text-xs px-4 py-2.5 rounded-xl hover:bg-emerald-800 transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-75"
             >
-              {isLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <span>Track</span>}
+              {isLoading ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Tracking...</span>
+                </>
+              ) : (
+                <span>Track</span>
+              )}
             </button>
           </form>
 
@@ -307,12 +376,15 @@ export const OrderTrackingModal: React.FC = () => {
               {customerOrders.map((ord) => (
                 <button
                   key={ord.id}
+                  type="button"
                   onClick={() => {
                     setSearchQuery(ord.orderNumber);
                     setCurrentOrder(ord);
                     setNeedsPhoneVerification(false);
                     setErrorMessage(null);
-                    if (ord.trackingToken) loadByToken(ord.trackingToken);
+                    if (ord.trackingToken) {
+                      saveCustomerToken(ord.orderNumber, ord.trackingToken);
+                    }
                   }}
                   className={`px-2.5 py-1 rounded-md border flex-shrink-0 transition-colors cursor-pointer ${
                     currentOrder?.orderNumber === ord.orderNumber

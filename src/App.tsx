@@ -2,6 +2,10 @@ import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { StoreProvider } from './context/StoreContext';
 import { AdminAuthProvider } from './context/AdminAuthContext';
+import { CustomerAuthProvider } from './context/CustomerAuthContext';
+import { CustomerAuthModal } from './components/CustomerAuthModal';
+import { MyOrdersModal } from './components/MyOrdersModal';
+import { CustomerAccountModal } from './components/CustomerAccountModal';
 import { StorefrontPage } from './pages/StorefrontPage';
 import { AdminPage } from './pages/AdminPage';
 import { OrderTrackingPage } from './pages/OrderTrackingPage';
@@ -24,20 +28,26 @@ export default function App() {
   return (
     <StoreProvider>
       <AdminAuthProvider>
-        <BrowserRouter>
-          <HashRedirector />
-          <Routes>
-            <Route path="/" element={<StorefrontPage />} />
-            <Route path="/admin" element={<AdminPage />} />
-            <Route path="/orders" element={<OrderTrackingPage />} />
-            <Route path="/orders/:token" element={<OrderTrackingPage />} />
-            <Route path="/tracking" element={<OrderTrackingPage />} />
-            <Route path="/tracking/:token" element={<OrderTrackingPage />} />
-            <Route path="/track" element={<OrderTrackingPage />} />
-            <Route path="/track/:token" element={<OrderTrackingPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </BrowserRouter>
+        <CustomerAuthProvider>
+          <BrowserRouter>
+            <HashRedirector />
+            <Routes>
+              <Route path="/" element={<StorefrontPage />} />
+              <Route path="/admin" element={<AdminPage />} />
+              <Route path="/orders" element={<OrderTrackingPage />} />
+              <Route path="/orders/:token" element={<OrderTrackingPage />} />
+              <Route path="/tracking" element={<OrderTrackingPage />} />
+              <Route path="/tracking/:token" element={<OrderTrackingPage />} />
+              <Route path="/track" element={<OrderTrackingPage />} />
+              <Route path="/track/:token" element={<OrderTrackingPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+            {/* Global Customer Modals */}
+            <CustomerAuthModal />
+            <MyOrdersModal />
+            <CustomerAccountModal />
+          </BrowserRouter>
+        </CustomerAuthProvider>
       </AdminAuthProvider>
     </StoreProvider>
   );

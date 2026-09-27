@@ -121,61 +121,22 @@ CREATE TABLE IF NOT EXISTS public.products (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 6. Authorized Admin Users Allowlist Table
-CREATE TABLE IF NOT EXISTS public.admin_users (
-  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  email TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'admin',
+-- 6. Dedicated Admin Credentials Table (Secure server-managed authentication)
+CREATE TABLE IF NOT EXISTS public.admin_credentials (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  security_key_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'owner',
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Revoke all table-level access on admin_users from anonymous users
-REVOKE ALL ON TABLE public.admin_users FROM anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.admin_users TO authenticated;
+-- Revoke all table-level access on admin_credentials from anonymous and authenticated users
+REVOKE ALL ON TABLE public.admin_credentials FROM anon, authenticated, public;
 
--- 7. Hardened Security Definer Helper Functions for RLS
--- Checks if current calling session (auth.uid()) is an active administrator
-CREATE OR REPLACE FUNCTION public.is_admin()
-RETURNS BOOLEAN
-LANGUAGE sql
-SECURITY DEFINER
-STABLE
-SET search_path = public, pg_temp
-AS $$
-  SELECT EXISTS (
-    SELECT 1 
-    FROM public.admin_users 
-    WHERE id = auth.uid() 
-      AND is_active = true
-  );
-$$;
-
-REVOKE EXECUTE ON FUNCTION public.is_admin() FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
-
--- Checks if current calling session (auth.uid()) is an active owner or super_admin
-CREATE OR REPLACE FUNCTION public.is_admin_owner()
-RETURNS BOOLEAN
-LANGUAGE sql
-SECURITY DEFINER
-STABLE
-SET search_path = public, pg_temp
-AS $$
-  SELECT EXISTS (
-    SELECT 1 
-    FROM public.admin_users 
-    WHERE id = auth.uid() 
-      AND role IN ('owner', 'super_admin')
-      AND is_active = true
-  );
-$$;
-
-REVOKE EXECUTE ON FUNCTION public.is_admin_owner() FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.is_admin_owner() TO authenticated;
-
--- 7b. Secure Order Lookup by Cryptographic Tracking Token
--- Exposes ONLY customer-safe fields; excludes internal tokens, payment transaction IDs, and customer phone
+-- 7a. Secure Order Lookup by Cryptographic Tracking Token
 CREATE OR REPLACE FUNCTION public.get_order_by_tracking_token(p_token TEXT)
 RETURNS TABLE (
   id TEXT,
@@ -249,8 +210,7 @@ $$;
 REVOKE ALL ON FUNCTION public.get_order_by_tracking_token(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_order_by_tracking_token(TEXT) TO anon, authenticated;
 
--- 7c. Secure Order Lookup by Order Number AND Exact Normalized Phone Verification
--- Verifies ownership without exposing full table or PII; returns at most 1 matching order
+-- 7b. Secure Order Lookup by Order Number AND Exact Normalized Phone Verification
 CREATE OR REPLACE FUNCTION public.get_order_by_number_and_phone(p_order_number TEXT, p_phone TEXT)
 RETURNS TABLE (
   id TEXT,
@@ -352,13 +312,9 @@ ALTER TABLE public.custom_cake_enquiries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customer_issues ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.admin_users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.admin_credentials ENABLE ROW LEVEL SECURITY;
 
--- ==========================================================
--- RLS Policies: Storefront Public Access vs Admin Authorizations
--- ==========================================================
-
--- Clean up existing legacy policies to ensure idempotent migration
+-- Clean up existing policies to ensure idempotent migration
 DO $$
 DECLARE
   r RECORD;
@@ -367,34 +323,14 @@ BEGIN
     SELECT policyname, tablename 
     FROM pg_policies 
     WHERE schemaname = 'public' 
-      AND tablename IN ('orders', 'admin_users', 'custom_cake_enquiries', 'customer_issues', 'reviews', 'products')
+      AND tablename IN ('orders', 'admin_credentials', 'custom_cake_enquiries', 'customer_issues', 'reviews', 'products')
   ) LOOP
     EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', r.policyname, r.tablename);
   END LOOP;
 END $$;
 
--- 1. Admin Users Table RLS: Non-recursive, hardened security design
--- An authenticated user can read exclusively their own record (solves Admin Access Denied without recursion)
-CREATE POLICY "admin_users_select_self"
-  ON public.admin_users
-  FOR SELECT TO authenticated
-  USING (auth.uid() = id);
-
--- Active administrators can read the team list
-CREATE POLICY "admin_users_select_team"
-  ON public.admin_users
-  FOR SELECT TO authenticated
-  USING (public.is_admin());
-
--- Active owner or super_admin can manage admin team records
-CREATE POLICY "admin_users_manage_owner"
-  ON public.admin_users
-  FOR ALL TO authenticated
-  USING (public.is_admin_owner())
-  WITH CHECK (public.is_admin_owner());
-
--- 2. Orders Table RLS: Protected customer orders & admin operations
--- Customers can submit new orders with constrained initial fields (cannot set kitchen delays or arbitrary status)
+-- RLS: Orders Table
+-- Customers can submit new orders with constrained initial fields
 CREATE POLICY "orders_public_insert"
   ON public.orders
   FOR INSERT TO anon, authenticated
@@ -408,27 +344,10 @@ CREATE POLICY "orders_public_insert"
     AND length(trim(customer_phone)) > 0
   );
 
--- Only verified active administrators can select all orders (customers use secure RPC functions)
-CREATE POLICY "orders_admin_select"
-  ON public.orders
-  FOR SELECT TO authenticated
-  USING (public.is_admin());
+-- Direct selects on orders are restricted; customers use secure lookup RPCs
+-- Server backend service role bypasses RLS for admin portal operations
 
--- Only verified active administrators can update orders (status, delays, cancellations)
-CREATE POLICY "orders_admin_update"
-  ON public.orders
-  FOR UPDATE TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-
--- Only verified active administrators can delete orders
-CREATE POLICY "orders_admin_delete"
-  ON public.orders
-  FOR DELETE TO authenticated
-  USING (public.is_admin());
-
--- 3. Custom Cake Enquiries RLS:
--- Anyone can submit cake enquiries with constrained non-privileged fields
+-- RLS: Custom Cake Enquiries
 CREATE POLICY "cake_enquiries_public_insert"
   ON public.custom_cake_enquiries
   FOR INSERT TO anon, authenticated
@@ -440,15 +359,7 @@ CREATE POLICY "cake_enquiries_public_insert"
     AND length(trim(customer_phone)) > 0
   );
 
--- Only active admins can select, quote, or manage custom cake enquiries
-CREATE POLICY "cake_enquiries_admin_all"
-  ON public.custom_cake_enquiries
-  FOR ALL TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-
--- 4. Customer Issues & Late Delivery Reports RLS:
--- Customers can submit issues (cannot read other customers' complaints)
+-- RLS: Customer Issues & Late Delivery Reports
 CREATE POLICY "issues_public_insert"
   ON public.customer_issues
   FOR INSERT TO anon, authenticated
@@ -460,21 +371,14 @@ CREATE POLICY "issues_public_insert"
     AND length(trim(description)) > 0
   );
 
--- Only active admins can view and resolve customer issues
-CREATE POLICY "issues_admin_all"
-  ON public.customer_issues
-  FOR ALL TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-
--- 5. Customer Reviews Table RLS:
--- Public can view approved customer testimonials
+-- RLS: Customer Reviews Table
+-- Public can view approved customer reviews
 CREATE POLICY "reviews_public_select"
   ON public.reviews
   FOR SELECT TO anon, authenticated
   USING (true);
 
--- Public can submit reviews, but cannot mark themselves as verified or add owner replies
+-- Public can submit reviews, but cannot mark verified or add owner replies
 CREATE POLICY "reviews_public_insert"
   ON public.reviews
   FOR INSERT TO anon, authenticated
@@ -486,52 +390,21 @@ CREATE POLICY "reviews_public_insert"
     AND length(trim(text)) > 0
   );
 
--- Only active admins can manage reviews (owner replies, moderation)
-CREATE POLICY "reviews_admin_all"
-  ON public.reviews
-  FOR ALL TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-
--- 6. Products Table RLS:
+-- RLS: Products Table
 -- Public can view menu items
 CREATE POLICY "products_public_select"
   ON public.products
   FOR SELECT TO anon, authenticated
   USING (true);
 
--- Only active admins can create, update, or delete menu items
-CREATE POLICY "products_admin_all"
-  ON public.products
-  FOR ALL TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-
--- 7. Supabase Storage: Product Images Bucket Setup
+-- Storage: product-images bucket setup
 INSERT INTO storage.buckets (id, name, public) 
 VALUES ('product-images', 'product-images', true)
 ON CONFLICT (id) DO UPDATE SET public = true;
 
--- Storage Policies:
 DROP POLICY IF EXISTS "Public Access product-images" ON storage.objects;
 CREATE POLICY "Public Access product-images" ON storage.objects
   FOR SELECT USING (bucket_id = 'product-images');
-
-DROP POLICY IF EXISTS "Admin Upload product-images" ON storage.objects;
-CREATE POLICY "Admin Upload product-images" ON storage.objects
-  FOR INSERT TO authenticated
-  WITH CHECK (bucket_id = 'product-images' AND public.is_admin());
-
-DROP POLICY IF EXISTS "Admin Update product-images" ON storage.objects;
-CREATE POLICY "Admin Update product-images" ON storage.objects
-  FOR UPDATE TO authenticated
-  USING (bucket_id = 'product-images' AND public.is_admin())
-  WITH CHECK (bucket_id = 'product-images' AND public.is_admin());
-
-DROP POLICY IF EXISTS "Admin Delete product-images" ON storage.objects;
-CREATE POLICY "Admin Delete product-images" ON storage.objects
-  FOR DELETE TO authenticated
-  USING (bucket_id = 'product-images' AND public.is_admin());
 
 -- Enable Realtime publication for live order and cake updates
 ALTER PUBLICATION supabase_realtime ADD TABLE public.orders;

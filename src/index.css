@@ -106,6 +106,108 @@
   animation: pulse-subtle 2.5s ease-in-out infinite;
 }
 
+/* Order Success & Processing Animations */
+@keyframes pb-circle-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pb-processing-dash {
+  0% {
+    stroke-dashoffset: 260;
+  }
+  50% {
+    stroke-dashoffset: 70;
+  }
+  100% {
+    stroke-dashoffset: 260;
+  }
+}
+
+@keyframes pb-checkmark-draw {
+  0% {
+    stroke-dashoffset: 65;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes pb-success-pop {
+  0% {
+    transform: scale(0.96);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes pb-halo-ripple {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.45;
+  }
+  100% {
+    transform: scale(1.45);
+    opacity: 0;
+  }
+}
+
+@keyframes pb-reveal-up {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pb-error-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-4px); }
+  40%, 80% { transform: translateX(4px); }
+}
+
+.animate-pb-spin {
+  animation: pb-circle-spin 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.animate-pb-processing {
+  stroke-dasharray: 260;
+  animation: pb-processing-dash 2s ease-in-out infinite;
+}
+
+.animate-pb-checkmark {
+  stroke-dasharray: 65;
+  stroke-dashoffset: 0;
+  animation: pb-checkmark-draw 0.75s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+}
+
+.animate-pb-success-pop {
+  animation: pb-success-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.animate-pb-ripple {
+  animation: pb-halo-ripple 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-pb-reveal {
+  animation: pb-reveal-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-pb-error {
+  animation: pb-error-shake 0.45s ease-in-out;
+}
+
 /* Custom Outlined Text for Dynamic Banner */
 .text-stroke-banner {
   -webkit-text-stroke: 1.5px rgba(255, 255, 255, 0.25);

@@ -18,8 +18,10 @@ import {
   Bike,
   Store,
   Utensils,
+  User,
 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
+import { useCustomerAuth } from '../context/CustomerAuthContext';
 import { PunjabiBistroLogo } from './PunjabiBistroLogo';
 
 export const Navbar: React.FC = () => {
@@ -36,6 +38,14 @@ export const Navbar: React.FC = () => {
     fulfillmentMode,
     setFulfillmentMode,
   } = useStore();
+
+  const {
+    user,
+    customerProfile,
+    openLoginModal,
+    setIsMyOrdersOpen,
+    setIsAccountModalOpen,
+  } = useCustomerAuth();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -208,11 +218,49 @@ export const Navbar: React.FC = () => {
 
             {/* Action Buttons */}
             <div className="flex items-center gap-2 sm:gap-3">
+              {/* Customer Account / My Orders / Sign In */}
+              {user ? (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    id="nav-my-orders-btn"
+                    onClick={() => setIsMyOrdersOpen(true)}
+                    className="hidden sm:flex items-center gap-1.5 text-xs font-semibold px-2.5 py-2 rounded-lg border border-emerald-300 text-emerald-950 bg-emerald-50 hover:bg-emerald-100 transition-colors cursor-pointer"
+                    title="My Orders & Live Status"
+                  >
+                    <Clock className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>My Orders</span>
+                  </button>
+                  <button
+                    id="nav-customer-account-btn"
+                    onClick={() => setIsAccountModalOpen(true)}
+                    className="flex items-center gap-1.5 text-xs font-semibold px-2 py-1.5 rounded-lg border border-emerald-200 hover:border-emerald-400 bg-white text-emerald-950 hover:bg-emerald-50 transition-colors cursor-pointer"
+                    title="Saved Addresses & Profile"
+                  >
+                    <div className="w-6 h-6 rounded-full bg-emerald-800 text-white font-bold flex items-center justify-center text-[10px] shadow-2xs">
+                      {customerProfile?.fullName?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || 'C'}
+                    </div>
+                    <span className="hidden md:inline max-w-[80px] truncate">
+                      {customerProfile?.fullName?.split(' ')[0] || 'Account'}
+                    </span>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  id="nav-customer-signin-btn"
+                  onClick={openLoginModal}
+                  className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg border border-emerald-300 text-emerald-900 bg-emerald-50/80 hover:bg-emerald-100 transition-colors cursor-pointer"
+                  title="Sign In with Google"
+                >
+                  <User className="w-3.5 h-3.5 text-emerald-700" />
+                  <span className="hidden sm:inline">Sign In</span>
+                </button>
+              )}
+
               {/* Order Tracking Button */}
               <button
                 id="nav-track-order-btn"
                 onClick={() => setIsTrackingOpen(true)}
-                className="hidden sm:flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-emerald-200 text-emerald-900 bg-emerald-50/50 hover:bg-emerald-100/60 transition-colors"
+                className="hidden sm:flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-emerald-200 text-emerald-900 bg-emerald-50/50 hover:bg-emerald-100/60 transition-colors cursor-pointer"
                 title="Track Your Order"
               >
                 <Clock className="w-3.5 h-3.5 text-emerald-700" />
@@ -233,9 +281,9 @@ export const Navbar: React.FC = () => {
               <motion.button
                 id="nav-cart-btn"
                 whileTap={{ scale: 0.95 }}
-                onClick={() => setIsCartOpen(true)}
+                onClick={() => (user ? setIsCartOpen(true) : openLoginModal())}
                 className="relative flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-xl font-medium text-xs sm:text-sm shadow-xs hover:shadow transition-all cursor-pointer"
-                title="View Cart"
+                title={user ? 'View Cart' : 'Sign in with Google to access Cart'}
               >
                 <ShoppingBag className="w-4 h-4" />
                 <span className="hidden sm:inline font-semibold">Cart</span>
@@ -329,13 +377,49 @@ export const Navbar: React.FC = () => {
             </div>
 
             <div className="pt-3 border-t border-emerald-100 flex flex-col gap-2">
+              {user ? (
+                <>
+                  <button
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      setIsMyOrdersOpen(true);
+                    }}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-50 text-emerald-950 font-bold text-sm border border-emerald-200 hover:bg-emerald-100 transition-colors cursor-pointer"
+                  >
+                    <Clock className="w-4 h-4 text-emerald-700" />
+                    <span>My Orders & History</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      setIsAccountModalOpen(true);
+                    }}
+                    className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-white text-stone-700 font-semibold text-xs border border-stone-200 hover:bg-stone-50 transition-colors cursor-pointer"
+                  >
+                    <User className="w-4 h-4 text-emerald-700" />
+                    <span>Saved Address ({customerProfile?.fullName || user.email})</span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    openLoginModal();
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-700 text-white font-bold text-sm hover:bg-emerald-800 transition-colors cursor-pointer shadow-xs"
+                >
+                  <User className="w-4 h-4" />
+                  <span>Sign In with Google</span>
+                </button>
+              )}
+
               <Link
                 to="/orders"
                 onClick={() => setMobileMenuOpen(false)}
-                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-emerald-200 text-sm font-semibold text-emerald-950 hover:bg-emerald-50 transition-colors"
+                className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border border-emerald-200 text-xs font-semibold text-emerald-950 hover:bg-emerald-50 transition-colors"
               >
-                <Clock className="w-4 h-4 text-emerald-700" />
-                <span>Track Active Order</span>
+                <Clock className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Track Order by Token / Number</span>
               </Link>
               <button
                 onClick={() => {

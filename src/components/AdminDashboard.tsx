@@ -30,13 +30,13 @@ import {
   Lock,
   Shield,
   Tag,
+  KeyRound,
 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { Order, OrderStatus, Product, CustomCakeEnquiry, DeliveryZone } from '../types';
 import { PunjabiBistroLogo } from './PunjabiBistroLogo';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { ProductImageManager } from './ProductImageManager';
-import { AdminUsersManager } from './AdminUsersManager';
 import { AdminCouponManager } from './AdminCouponManager';
 
 export const AdminDashboard: React.FC = () => {
@@ -210,6 +210,62 @@ export const AdminDashboard: React.FC = () => {
     if (!quoteEnquiry) return;
     updateCakeEnquiry(quoteEnquiry.id, 'quotation_sent', Number(quoteAmount), quoteNotes);
     setQuoteEnquiry(null);
+  };
+
+  // Credentials Update State
+  const [credCurrentPassword, setCredCurrentPassword] = useState('');
+  const [credNewUsername, setCredNewUsername] = useState('');
+  const [credNewPassword, setCredNewPassword] = useState('');
+  const [credNewSecurityKey, setCredNewSecurityKey] = useState('');
+  const [credLoading, setCredLoading] = useState(false);
+  const [credStatusMsg, setCredStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const handleUpdateCredentials = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!credCurrentPassword) {
+      setCredStatusMsg({ type: 'error', text: 'Please enter your current password to authorize changes.' });
+      return;
+    }
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('pb_admin_session_token') : null;
+    if (!token) {
+      setCredStatusMsg({ type: 'error', text: 'Admin session missing. Please re-login.' });
+      return;
+    }
+
+    setCredLoading(true);
+    setCredStatusMsg(null);
+    try {
+      const res = await fetch('/api/admin/credentials/update', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          currentPassword: credCurrentPassword,
+          newUsername: credNewUsername.trim() || undefined,
+          newPassword: credNewPassword || undefined,
+          newSecurityKey: credNewSecurityKey || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setCredStatusMsg({ type: 'error', text: data.error || 'Failed to update credentials.' });
+      } else {
+        setCredStatusMsg({ type: 'success', text: 'Credentials updated successfully!' });
+        setCredCurrentPassword('');
+        setCredNewUsername('');
+        setCredNewPassword('');
+        setCredNewSecurityKey('');
+        if (data.username) {
+          localStorage.setItem('pb_admin_username', data.username);
+        }
+      }
+    } catch {
+      setCredStatusMsg({ type: 'error', text: 'Network error communicating with server.' });
+    } finally {
+      setCredLoading(false);
+    }
   };
 
   return (
@@ -1068,8 +1124,115 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Admin Portal Security & Google OAuth Allowlist Management */}
-            <AdminUsersManager />
+            {/* Private Portal Security Information */}
+            <div className="bg-white p-6 rounded-3xl border border-emerald-100 shadow-xs">
+              <div className="flex items-center gap-2 mb-2">
+                <Shield className="w-5 h-5 text-emerald-700" />
+                <h3 className="font-serif font-bold text-lg text-emerald-950">
+                  Portal Access &amp; Operations Security
+                </h3>
+              </div>
+              <p className="text-xs text-stone-600 leading-relaxed">
+                Management operations are secured with server-side authentication. Direct access to customer records, order updates, and live menu configurations requires an active administrator session.
+              </p>
+            </div>
+
+            {/* Change Administrator Credentials Card */}
+            <div className="bg-white p-6 rounded-3xl border border-emerald-100 shadow-xs">
+              <div className="flex items-center gap-2 mb-1">
+                <KeyRound className="w-5 h-5 text-emerald-700" />
+                <h3 className="font-serif font-bold text-lg text-emerald-950">
+                  Update Administrator Credentials
+                </h3>
+              </div>
+              <p className="text-xs text-stone-600 mb-5">
+                Customize your portal login credentials anytime. Requires your current password to authorize updates.
+              </p>
+
+              {credStatusMsg && (
+                <div
+                  className={`p-3.5 rounded-xl text-xs flex items-center gap-2 mb-4 ${
+                    credStatusMsg.type === 'success'
+                      ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                      : 'bg-rose-50 border border-rose-200 text-rose-800'
+                  }`}
+                >
+                  {credStatusMsg.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+                  )}
+                  <span>{credStatusMsg.text}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleUpdateCredentials} className="space-y-4 max-w-xl">
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">
+                    Current Password <span className="text-rose-600">*</span>
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="Enter current password to authorize"
+                    value={credCurrentPassword}
+                    onChange={(e) => setCredCurrentPassword(e.target.value)}
+                    className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                  <div>
+                    <label className="block text-xs font-semibold text-stone-700 mb-1">
+                      New Username (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Leave blank to keep unchanged"
+                      value={credNewUsername}
+                      onChange={(e) => setCredNewUsername(e.target.value)}
+                      className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:border-emerald-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-stone-700 mb-1">
+                      New Password (Optional)
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="Min 6 characters"
+                      value={credNewPassword}
+                      onChange={(e) => setCredNewPassword(e.target.value)}
+                      className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:border-emerald-600"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">
+                    New Security Key (Optional)
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Min 6 characters (leave blank to keep unchanged)"
+                    value={credNewSecurityKey}
+                    onChange={(e) => setCredNewSecurityKey(e.target.value)}
+                    className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={credLoading}
+                    className="px-5 py-2.5 rounded-xl bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                  >
+                    {credLoading ? 'Saving...' : 'Save New Credentials'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
 
