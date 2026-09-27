@@ -150,20 +150,170 @@ CREATE TABLE IF NOT EXISTS public.products (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 6. Dedicated Admin Credentials Table (Secure server-managed authentication)
-CREATE TABLE IF NOT EXISTS public.admin_credentials (
+-- 6. Dedicated Admin Keys Table (Secure Server & Database Authentication)
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS public.admin_keys (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   username TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   security_key_hash TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'owner',
-  is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Revoke all table-level access on admin_credentials from anonymous and authenticated users
-REVOKE ALL ON TABLE public.admin_credentials FROM anon, authenticated, public;
+-- Enable Row Level Security on admin_keys
+ALTER TABLE public.admin_keys ENABLE ROW LEVEL SECURITY;
+
+-- CRITICAL: Block all direct client/public access to admin_keys
+REVOKE ALL ON TABLE public.admin_keys FROM anon, authenticated, public;
+
+-- Automatic Hashing Trigger:
+-- If an admin edits password_hash or security_key_hash in Supabase Table Editor using plaintext,
+-- this trigger automatically converts it to a secure bcrypt hash before saving to the table!
+CREATE OR REPLACE FUNCTION public.hash_admin_keys_trigger()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  -- If password_hash is not already a bcrypt ($2a$, $2b$) or pbkdf2 hash, hash it with bcrypt
+  IF NEW.password_hash IS NOT NULL AND NEW.password_hash !~ '^\$2[ab]\$' AND NEW.password_hash !~ '^pbkdf2\$' THEN
+    NEW.password_hash := crypt(NEW.password_hash, gen_salt('bf', 10));
+  END IF;
+
+  -- If security_key_hash is not already a bcrypt or pbkdf2 hash, hash it with bcrypt
+  IF NEW.security_key_hash IS NOT NULL AND NEW.security_key_hash !~ '^\$2[ab]\$' AND NEW.security_key_hash !~ '^pbkdf2\$' THEN
+    NEW.security_key_hash := crypt(NEW.security_key_hash, gen_salt('bf', 10));
+  END IF;
+
+  NEW.updated_at := NOW();
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_hash_admin_keys ON public.admin_keys;
+CREATE TRIGGER trg_hash_admin_keys
+BEFORE INSERT OR UPDATE ON public.admin_keys
+FOR EACH ROW
+EXECUTE FUNCTION public.hash_admin_keys_trigger();
+
+-- Helper function: Change credentials directly from Supabase SQL Editor
+-- Usage: SELECT set_admin_credentials('admin', 'YourNewPassword123', 'YourNewSecurityKey123');
+CREATE OR REPLACE FUNCTION public.set_admin_credentials(
+  p_username TEXT,
+  p_new_password TEXT,
+  p_new_security_key TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_user TEXT := lower(trim(p_username));
+  v_pass_hash TEXT;
+  v_key_hash TEXT;
+BEGIN
+  IF length(trim(p_new_password)) < 6 THEN
+    RAISE EXCEPTION 'Password must be at least 6 characters.';
+  END IF;
+  IF length(trim(p_new_security_key)) < 4 THEN
+    RAISE EXCEPTION 'Security key must be at least 4 characters.';
+  END IF;
+
+  v_pass_hash := crypt(trim(p_new_password), gen_salt('bf', 10));
+  v_key_hash := crypt(trim(p_new_security_key), gen_salt('bf', 10));
+
+  INSERT INTO public.admin_keys (username, password_hash, security_key_hash, updated_at)
+  VALUES (v_user, v_pass_hash, v_key_hash, NOW())
+  ON CONFLICT (username)
+  DO UPDATE SET
+    password_hash = EXCLUDED.password_hash,
+    security_key_hash = EXCLUDED.security_key_hash,
+    updated_at = NOW();
+
+  RETURN jsonb_build_object('success', true, 'username', v_user, 'updated_at', NOW());
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.set_admin_credentials(TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+
+-- Server verification endpoint Step 1 (Returns boolean only, never credentials or hashes)
+CREATE OR REPLACE FUNCTION public.auth_verify_admin_step1(
+  p_username TEXT,
+  p_password_attempt TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_rec RECORD;
+  v_valid BOOLEAN := FALSE;
+BEGIN
+  SELECT id, username, password_hash
+  INTO v_rec
+  FROM public.admin_keys
+  WHERE lower(username) = lower(trim(p_username))
+  LIMIT 1;
+
+  IF v_rec IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Invalid credentials');
+  END IF;
+
+  IF v_rec.password_hash ~ '^\$2[ab]\$' THEN
+    v_valid := (crypt(p_password_attempt, v_rec.password_hash) = v_rec.password_hash);
+  END IF;
+
+  IF v_valid THEN
+    RETURN jsonb_build_object('success', true, 'username', v_rec.username);
+  ELSE
+    RETURN jsonb_build_object('success', false, 'error', 'Invalid credentials');
+  END IF;
+END;
+$$;
+
+-- Server verification endpoint Step 2 (Returns boolean only, never credentials or hashes)
+CREATE OR REPLACE FUNCTION public.auth_verify_admin_step2(
+  p_username TEXT,
+  p_security_key_attempt TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_rec RECORD;
+  v_valid BOOLEAN := FALSE;
+BEGIN
+  SELECT id, username, security_key_hash
+  INTO v_rec
+  FROM public.admin_keys
+  WHERE lower(username) = lower(trim(p_username))
+  LIMIT 1;
+
+  IF v_rec IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Invalid credentials');
+  END IF;
+
+  IF v_rec.security_key_hash ~ '^\$2[ab]\$' THEN
+    v_valid := (crypt(p_security_key_attempt, v_rec.security_key_hash) = v_rec.security_key_hash);
+  END IF;
+
+  IF v_valid THEN
+    RETURN jsonb_build_object('success', true, 'username', v_rec.username);
+  ELSE
+    RETURN jsonb_build_object('success', false, 'error', 'Invalid credentials');
+  END IF;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.auth_verify_admin_step1(TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.auth_verify_admin_step2(TEXT, TEXT) TO anon, authenticated;
 
 -- 7a. Secure Order Lookup by Cryptographic Tracking Token
 CREATE OR REPLACE FUNCTION public.get_order_by_tracking_token(p_token TEXT)

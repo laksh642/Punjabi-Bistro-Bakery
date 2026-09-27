@@ -152,7 +152,32 @@ export function generateTrackingToken(): string {
 export function mapRowToOrder(row: any): Order {
   const rawItems = Array.isArray(row.items) ? row.items : [];
   const metaItem = rawItems.find((i: any) => i && i._meta);
-  const cleanItems = rawItems.filter((i: any) => !i || !i._meta);
+  const cleanItems = rawItems
+    .filter((i: any) => i && !i._meta)
+    .map((i: any) => {
+      const prod = i.product || {};
+      const prodName = prod.name || i.name || i.productName || i.title || 'Item';
+      return {
+        ...i,
+        cartItemId: i.cartItemId || i.id || `item-${Math.random().toString(36).substring(2, 9)}`,
+        productId: i.productId || prod.id || 'prod-unknown',
+        product: {
+          id: prod.id || i.productId || 'prod-unknown',
+          name: prodName,
+          price: Number(prod.price ?? i.unitPrice ?? i.price ?? 0),
+          image: prod.image || i.image || 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=400&q=80',
+          categoryId: prod.categoryId || i.categoryId || 'all',
+          categoryName: prod.categoryName || i.categoryName || 'Food',
+          description: prod.description || '',
+          isAvailable: prod.isAvailable !== undefined ? Boolean(prod.isAvailable) : true,
+          ...prod,
+        },
+        quantity: Number(i.quantity) || 1,
+        unitPrice: Number(i.unitPrice ?? prod.price ?? i.price ?? 0),
+        totalPrice: Number(i.totalPrice ?? ((Number(i.unitPrice ?? prod.price ?? 0)) * (Number(i.quantity) || 1))),
+        selectedOptions: Array.isArray(i.selectedOptions) ? i.selectedOptions : [],
+      };
+    });
 
   return {
     id: row.id,

@@ -139,14 +139,22 @@ export const CartDrawer: React.FC = () => {
   if (!isCartOpen) return null;
 
   // Selected Zone calculation
-  const selectedZone = deliveryZones.find((z) => z.id === selectedZoneId) || deliveryZones[0];
+  const selectedZone = deliveryZones.find((z) => z.id === selectedZoneId) || deliveryZones[0] || {
+    id: 'zone-1',
+    name: 'Standard Delivery',
+    fee: 20,
+    freeAbove: 299,
+    estimatedMinutes: '25-35 mins',
+    description: 'Dharamkot Delivery',
+  };
 
   let deliveryFee = 0;
   if (orderType === 'delivery') {
-    if (selectedZone.freeDeliveryThreshold && cartSubtotal >= selectedZone.freeDeliveryThreshold) {
+    const freeThreshold = (selectedZone as any)?.freeDeliveryThreshold || selectedZone?.freeAbove;
+    if (freeThreshold && cartSubtotal >= freeThreshold) {
       deliveryFee = 0;
     } else {
-      deliveryFee = selectedZone.fee;
+      deliveryFee = selectedZone?.fee || 0;
     }
   }
 
@@ -387,15 +395,15 @@ export const CartDrawer: React.FC = () => {
                   {cart.map((item) => (
                     <div key={item.cartItemId} className="pt-3 first:pt-0 flex gap-3">
                       <img
-                        src={item.product.image}
-                        alt={item.product.name}
+                        src={item.product?.image || (item as any).image || 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=400&q=80'}
+                        alt={item.product?.name || (item as any).name || 'Cart item'}
                         className="w-16 h-16 rounded-xl object-cover border border-emerald-200 flex-shrink-0"
                       />
                       <div className="flex-1 flex flex-col justify-between">
                         <div>
                           <div className="flex items-start justify-between gap-1">
                             <h4 className="font-bold text-xs sm:text-sm text-emerald-950 line-clamp-1">
-                              {item.product.name}
+                              {item.product?.name || (item as any).name || 'Item'}
                             </h4>
                             <span className="font-bold text-xs sm:text-sm text-emerald-700">
                               ₹{item.totalPrice}
@@ -816,7 +824,7 @@ export const CartDrawer: React.FC = () => {
                 </div>
                 {orderType === 'delivery' && (
                   <div className="flex justify-between text-emerald-900">
-                    <span>Delivery ({selectedZone.name})</span>
+                    <span>Delivery ({selectedZone?.name || 'Standard'})</span>
                     <span className="font-semibold">
                       {deliveryFee === 0 ? (
                         <span className="text-emerald-700 font-bold">FREE</span>

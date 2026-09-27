@@ -38,7 +38,7 @@ export const AdminPage: React.FC = () => {
     );
   }
 
-  // 2. Unauthenticated: Render dedicated 3-field Login Screen
+  // 2. Unauthenticated: Render dedicated Two-Step Login Screen
   if (!isAuthenticated) {
     return <AdminLoginScreen />;
   }

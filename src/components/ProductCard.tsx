@@ -69,10 +69,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenDetails
       {/* Product Image and Badges */}
       <div className="relative aspect-[4/3] w-full overflow-hidden bg-emerald-50/50">
         <img
-          src={product.image}
-          alt={product.name}
+          src={product?.image || 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=400&q=80'}
+          alt={product?.name || 'Product'}
           className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${
-            !product.isAvailable ? 'grayscale' : ''
+            !product?.isAvailable ? 'grayscale' : ''
           }`}
           loading="lazy"
         />
@@ -120,7 +120,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenDetails
         <div>
           <div className="flex items-start justify-between gap-2">
             <h3 className="font-bold text-sm sm:text-base text-[#0F2916] group-hover:text-emerald-700 transition-colors line-clamp-1">
-              {product.name}
+              {product?.name || 'Item'}
             </h3>
 
             {/* Veg / Eggless green dot indicator */}

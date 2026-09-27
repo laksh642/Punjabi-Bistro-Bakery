@@ -7,6 +7,9 @@ interface AdminAuthContextType {
   adminUsername: string | null;
   isLoading: boolean;
   authError: string | null;
+  clearAuthError: () => void;
+  loginStep1: (username: string, password: string) => Promise<{ success: boolean; step1Token?: string; error?: string }>;
+  loginStep2: (step1Token: string, securityKey: string) => Promise<{ success: boolean; error?: string }>;
   login: (username: string, password: string, securityKey: string) => Promise<boolean>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
@@ -82,6 +85,81 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   useEffect(() => {
     verifySession();
   }, [verifySession]);
+
+  const clearAuthError = useCallback(() => {
+    setAuthError(null);
+  }, []);
+
+  const loginStep1 = async (
+    username: string,
+    password: string
+  ): Promise<{ success: boolean; step1Token?: string; error?: string }> => {
+    setAuthError(null);
+
+    try {
+      const res = await fetch('/api/admin/login-step1', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success || !data.step1Token) {
+        const errorMsg = data.error || 'Invalid username or password.';
+        setAuthError(errorMsg);
+        return { success: false, error: errorMsg };
+      }
+
+      return { success: true, step1Token: data.step1Token };
+    } catch {
+      const errorMsg = 'Unable to reach authentication server. Please try again.';
+      setAuthError(errorMsg);
+      return { success: false, error: errorMsg };
+    }
+  };
+
+  const loginStep2 = async (
+    step1Token: string,
+    securityKey: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    setAuthError(null);
+
+    try {
+      const res = await fetch('/api/admin/login-step2', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ step1Token, securityKey }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success || !data.token) {
+        const errorMsg = data.error || 'Invalid security key.';
+        setAuthError(errorMsg);
+        return { success: false, error: errorMsg };
+      }
+
+      try {
+        localStorage.setItem(ADMIN_TOKEN_KEY, data.token);
+      } catch {
+        // ignore
+      }
+
+      setIsAuthenticated(true);
+      setAdminUsername(data.username || 'admin');
+      setAuthError(null);
+      return { success: true };
+    } catch {
+      const errorMsg = 'Unable to reach authentication server. Please try again.';
+      setAuthError(errorMsg);
+      return { success: false, error: errorMsg };
+    }
+  };
 
   const login = async (
     username: string,
@@ -167,6 +245,9 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         adminUsername,
         isLoading,
         authError,
+        clearAuthError,
+        loginStep1,
+        loginStep2,
         login,
         logout,
         refreshSession: verifySession,

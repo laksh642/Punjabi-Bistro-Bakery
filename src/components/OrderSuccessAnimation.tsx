@@ -399,11 +399,11 @@ export const OrderSuccessAnimation: React.FC<OrderSuccessAnimationProps> = ({
                   <span className="font-bold text-stone-900">Total: ₹{order.total}</span>
                 </div>
                 <div className="p-3 space-y-2 max-h-36 overflow-y-auto divide-y divide-stone-100">
-                  {order.items.map((item, idx) => (
+                  {order.items?.map((item, idx) => (
                     <div key={idx} className="pt-2 first:pt-0 flex items-center justify-between">
                       <div className="flex-1 pr-2 truncate">
                         <span className="font-semibold text-stone-800">
-                          {item.quantity}× {item.product.name}
+                          {item.quantity}× {item.product?.name || (item as any).name || (item as any).productName || 'Item'}
                         </span>
                         {item.selectedOptions && item.selectedOptions.length > 0 && (
                           <span className="block text-[10px] text-stone-500 truncate">

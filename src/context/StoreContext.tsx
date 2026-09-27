@@ -219,13 +219,58 @@ const StoreContext = createContext<StoreContextType | undefined>(undefined);
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Load from localStorage or initial
   const [products, setProducts] = useState<Product[]>(() => {
-    const saved = localStorage.getItem('pb_products');
-    return saved ? JSON.parse(saved) : INITIAL_PRODUCTS;
+    try {
+      const saved = localStorage.getItem('pb_products');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed.every((p) => p && typeof p === 'object' && p.name)) {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return INITIAL_PRODUCTS;
   });
 
   const [cart, setCart] = useState<CartItem[]>(() => {
-    const saved = localStorage.getItem('pb_cart');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('pb_cart');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .filter((i) => i && typeof i === 'object')
+            .map((i) => {
+              const prod = i.product || {};
+              const prodName = prod.name || (i as any).name || (i as any).productName || 'Item';
+              return {
+                ...i,
+                cartItemId: i.cartItemId || `cart-${Math.random().toString(36).substring(2, 9)}`,
+                productId: i.productId || prod.id || 'prod-unknown',
+                product: {
+                  id: prod.id || i.productId || 'prod-unknown',
+                  name: prodName,
+                  price: Number(prod.price ?? i.unitPrice ?? i.price ?? 0),
+                  image: prod.image || (i as any).image || 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=400&q=80',
+                  categoryId: prod.categoryId || 'all',
+                  categoryName: prod.categoryName || 'Food',
+                  description: prod.description || '',
+                  isAvailable: prod.isAvailable !== undefined ? Boolean(prod.isAvailable) : true,
+                  ...prod,
+                },
+                quantity: Number(i.quantity) || 1,
+                unitPrice: Number(i.unitPrice ?? prod.price ?? 0),
+                totalPrice: Number(i.totalPrice ?? ((Number(i.unitPrice ?? prod.price ?? 0)) * (Number(i.quantity) || 1))),
+                selectedOptions: Array.isArray(i.selectedOptions) ? i.selectedOptions : [],
+              };
+            });
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return [];
   });
 
   // Customer-placed orders strictly isolated on this device/browser
@@ -1096,14 +1141,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // WhatsApp Formatter
   const generateWhatsAppOrderUrl = (order: Order): string => {
-    const itemsList = order.items
+    const itemsList = (order.items || [])
       .map(
         (i) =>
-          `• ${i.quantity}x ${i.product.name}${
-            i.selectedOptions.length > 0
+          `• ${i.quantity || 1}x ${i.product?.name || (i as any).name || (i as any).productName || 'Item'}${
+            i.selectedOptions && i.selectedOptions.length > 0
               ? ` (${i.selectedOptions.map((o) => o.optionName).join(', ')})`
               : ''
-          } - ₹${i.totalPrice}`
+          } - ₹${i.totalPrice || 0}`
       )
       .join('\n');
 

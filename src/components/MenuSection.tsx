@@ -38,15 +38,17 @@ export const MenuSection: React.FC<MenuSectionProps> = ({ selectedMood, onClearM
   // Filter products
   const filteredProducts = useMemo(() => {
     return products.filter((item) => {
+      if (!item || !item.name) return false;
+
       // Mood filter
       if (selectedMood) {
         const moodObj = MOODS.find((m) => m.id === selectedMood);
         if (moodObj) {
           const matchMood = moodObj.filterKeywords.some(
             (kw) =>
-              item.name.toLowerCase().includes(kw) ||
-              item.description.toLowerCase().includes(kw) ||
-              item.categoryName.toLowerCase().includes(kw)
+              (item.name || '').toLowerCase().includes(kw) ||
+              (item.description || '').toLowerCase().includes(kw) ||
+              (item.categoryName || '').toLowerCase().includes(kw)
           );
           if (!matchMood) return false;
         }
@@ -60,9 +62,9 @@ export const MenuSection: React.FC<MenuSectionProps> = ({ selectedMood, onClearM
       // Search Query
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase().trim();
-        const matchesName = item.name.toLowerCase().includes(query);
-        const matchesDesc = item.description.toLowerCase().includes(query);
-        const matchesCat = item.categoryName.toLowerCase().includes(query);
+        const matchesName = (item.name || '').toLowerCase().includes(query);
+        const matchesDesc = (item.description || '').toLowerCase().includes(query);
+        const matchesCat = (item.categoryName || '').toLowerCase().includes(query);
         if (!matchesName && !matchesDesc && !matchesCat) {
           return false;
         }

@@ -26,11 +26,11 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({ product,
       // Auto-select the first option for any 'single' choice group (like 0.5kg cake)
       const defaults: CartItemOption[] = [];
       product.customizationGroups?.forEach((grp) => {
-        if (grp.type === 'single' && grp.options.length > 0) {
+        if (grp?.type === 'single' && Array.isArray(grp.options) && grp.options.length > 0 && grp.options[0]?.name) {
           defaults.push({
-            groupName: grp.name,
+            groupName: grp.name || '',
             optionName: grp.options[0].name,
-            price: grp.options[0].price,
+            price: Number(grp.options[0].price) || 0,
           });
         }
       });
@@ -166,7 +166,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({ product,
                   </div>
 
                   <div className="space-y-1.5">
-                    {group.options.map((opt) => {
+                    {group.options?.filter((opt) => opt && opt.name).map((opt) => {
                       const isSelected = selectedOptions.some(
                         (o) => o.groupName === group.name && o.optionName === opt.name
                       );

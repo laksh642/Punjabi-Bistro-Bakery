@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { createServer as createViteServer } from 'vite';
 import { createClient } from '@supabase/supabase-js';
 
@@ -32,80 +33,69 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 // ============================================================================
 // 2. CRYPTOGRAPHIC HASHING & SESSION HELPERS
 // ============================================================================
-// Server secret for signing session tokens (generated on launch or from env)
+// Server secret for signing session and challenge tokens
 const SESSION_SECRET =
   process.env.ADMIN_SESSION_SECRET ||
   crypto.randomBytes(32).toString('hex');
 
-const HASH_ITERATIONS = 100000;
-const HASH_KEYLEN = 64;
-const HASH_DIGEST = 'sha512';
-
 /**
- * Hash a secret using PBKDF2-SHA512 with a cryptographically secure random salt.
- * Output format: pbkdf2$sha512$iterations$saltHex$derivedKeyHex
+ * Hash a secret using bcrypt (10 rounds) by default for seamless Supabase pgcrypto compatibility.
  */
 function hashSecret(plainText: string): string {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const derived = crypto.pbkdf2Sync(
-    plainText,
-    salt,
-    HASH_ITERATIONS,
-    HASH_KEYLEN,
-    HASH_DIGEST
-  );
-  return `pbkdf2$sha512$${HASH_ITERATIONS}$${salt}$${derived.toString('hex')}`;
+  return bcrypt.hashSync(plainText, 10);
 }
 
 /**
- * Verify a plain text secret against a stored PBKDF2 hash using constant-time comparison.
+ * Verify a plain text secret against a stored hash (supports bcrypt and PBKDF2).
  */
 function verifySecret(plainText: string, storedHash: string): boolean {
+  if (!plainText || !storedHash) return false;
   try {
-    const parts = storedHash.split('$');
-    if (parts.length !== 5 || parts[0] !== 'pbkdf2' || parts[1] !== 'sha512') {
-      return false;
+    // 1. Check for bcrypt hash ($2a$, $2b$, $2y$)
+    if (storedHash.startsWith('$2a$') || storedHash.startsWith('$2b$') || storedHash.startsWith('$2y$')) {
+      return bcrypt.compareSync(plainText, storedHash);
     }
-    const iterations = parseInt(parts[2], 10);
-    const salt = parts[3];
-    const originalDerived = Buffer.from(parts[4], 'hex');
 
-    const testDerived = crypto.pbkdf2Sync(
-      plainText,
-      salt,
-      iterations,
-      originalDerived.length,
-      'sha512'
-    );
+    // 2. Check for PBKDF2 hash (pbkdf2$sha512$...)
+    const parts = storedHash.split('$');
+    if (parts.length === 5 && parts[0] === 'pbkdf2' && parts[1] === 'sha512') {
+      const iterations = parseInt(parts[2], 10);
+      const salt = parts[3];
+      const originalDerived = Buffer.from(parts[4], 'hex');
 
-    return crypto.timingSafeEqual(originalDerived, testDerived);
+      const testDerived = crypto.pbkdf2Sync(
+        plainText,
+        salt,
+        iterations,
+        originalDerived.length,
+        'sha512'
+      );
+
+      return crypto.timingSafeEqual(originalDerived, testDerived);
+    }
+
+    return false;
   } catch {
     return false;
   }
 }
 
 /**
- * Perform a dummy hash calculation to eliminate timing side-channels when a user is not found.
+ * Constant-time dummy hash verification to thwart timing side-channel attacks.
  */
 function dummyHashVerification(plainText: string): void {
   try {
-    crypto.pbkdf2Sync(
-      plainText,
-      '00112233445566778899aabbccddeeff',
-      HASH_ITERATIONS,
-      HASH_KEYLEN,
-      HASH_DIGEST
-    );
+    bcrypt.compareSync(plainText, '$2b$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012');
   } catch {
     // ignore
   }
 }
 
 // ============================================================================
-// 3. PERSISTENT ADMIN CREDENTIAL METADATA STORE
+// 3. PERSISTENT ADMIN CREDENTIAL & ADMIN_KEYS STORE
 // ============================================================================
 const DATA_DIR = path.join(process.cwd(), 'data');
-const CREDENTIALS_FILE = path.join(DATA_DIR, 'admin-credentials.json');
+const ADMIN_KEYS_FILE = path.join(DATA_DIR, 'admin-keys.json');
 
 interface StoredAdminRecord {
   id: string;
@@ -123,27 +113,138 @@ function ensureDataDir(): void {
   }
 }
 
-function loadAdminCredentials(): StoredAdminRecord | null {
+/**
+ * Loads admin record strictly server-side:
+ * 1. Attempts to read from Supabase public.admin_keys
+ * 2. Falls back to protected local file data/admin-keys.json (0600 mode)
+ */
+async function loadAdminRecord(username: string): Promise<StoredAdminRecord | null> {
+  const cleanUser = username.trim().toLowerCase();
+
+  // Try Supabase admin_keys table first
+  try {
+    const { data, error } = await supabase
+      .from('admin_keys')
+      .select('id, username, password_hash, security_key_hash, created_at, updated_at')
+      .ilike('username', cleanUser)
+      .limit(1)
+      .maybeSingle();
+
+    if (!error && data && data.password_hash && data.security_key_hash) {
+      return {
+        id: data.id,
+        username: data.username,
+        password_hash: data.password_hash,
+        security_key_hash: data.security_key_hash,
+        is_active: true,
+        created_at: data.created_at,
+        updated_at: data.updated_at,
+      };
+    }
+  } catch {
+    // Fall through to secure local store
+  }
+
+  // Fallback to secure server store
   ensureDataDir();
-  if (fs.existsSync(CREDENTIALS_FILE)) {
-    try {
-      const raw = fs.readFileSync(CREDENTIALS_FILE, 'utf-8');
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.username && parsed.password_hash && parsed.security_key_hash) {
-        return parsed as StoredAdminRecord;
+  const fileCandidates = [
+    ADMIN_KEYS_FILE,
+    path.join(DATA_DIR, 'admin-credentials.json'),
+  ];
+
+  for (const f of fileCandidates) {
+    if (fs.existsSync(f)) {
+      try {
+        const raw = fs.readFileSync(f, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.username && parsed.password_hash && parsed.security_key_hash) {
+          if (parsed.username.toLowerCase() === cleanUser) {
+            return parsed as StoredAdminRecord;
+          }
+        }
+      } catch {
+        // ignore
       }
-    } catch {
-      return null;
     }
   }
+
   return null;
 }
 
-function saveAdminCredentials(record: StoredAdminRecord): void {
+/**
+ * Saves admin record securely:
+ * 1. Writes to data/admin-keys.json with 0600 (owner-only) permissions
+ * 2. Syncs to Supabase public.admin_keys if database permissions allow
+ */
+async function saveAdminRecord(record: StoredAdminRecord): Promise<void> {
   ensureDataDir();
-  fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(record, null, 2), {
+  fs.writeFileSync(ADMIN_KEYS_FILE, JSON.stringify(record, null, 2), {
     mode: 0o600, // Read/write only for process owner
   });
+
+  try {
+    await supabase.from('admin_keys').upsert(
+      {
+        username: record.username.toLowerCase(),
+        password_hash: record.password_hash,
+        security_key_hash: record.security_key_hash,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'username' }
+    );
+  } catch {
+    // Local store is authoritative if database permissions are restricted
+  }
+}
+
+// In-memory challenge storage for Step 1 -> Step 2 transition
+interface Step1Challenge {
+  challengeId: string;
+  username: string;
+  expiresAt: number;
+}
+const activeStep1Challenges = new Map<string, Step1Challenge>();
+
+function createStep1Token(username: string): string {
+  const challengeId = crypto.randomUUID();
+  const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minute challenge window
+  activeStep1Challenges.set(challengeId, { challengeId, username, expiresAt });
+
+  // Clean up stale challenges
+  const now = Date.now();
+  for (const [id, ch] of activeStep1Challenges.entries()) {
+    if (ch.expiresAt < now) activeStep1Challenges.delete(id);
+  }
+
+  const payload = JSON.stringify({ challengeId, username, step: 1, exp: expiresAt });
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+  return `${Buffer.from(payload).toString('base64url')}.${sig}`;
+}
+
+function verifyStep1Token(tokenString: string): { valid: boolean; username?: string; error?: string } {
+  try {
+    const parts = tokenString.split('.');
+    if (parts.length !== 2) return { valid: false, error: 'Malformed verification token.' };
+    const [payloadB64, sig] = parts;
+    const payloadJson = Buffer.from(payloadB64, 'base64url').toString('utf-8');
+    const expectedSig = crypto.createHmac('sha256', SESSION_SECRET).update(payloadJson).digest('base64url');
+    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) {
+      return { valid: false, error: 'Invalid verification token signature.' };
+    }
+    const payload = JSON.parse(payloadJson);
+    if (!payload.exp || payload.exp < Date.now()) {
+      return { valid: false, error: 'Verification session expired. Please start over from step 1.' };
+    }
+    const stored = activeStep1Challenges.get(payload.challengeId);
+    if (!stored || stored.expiresAt < Date.now()) {
+      return { valid: false, error: 'Challenge session already used or expired.' };
+    }
+    // Single-use: consume challenge
+    activeStep1Challenges.delete(payload.challengeId);
+    return { valid: true, username: payload.username };
+  } catch {
+    return { valid: false, error: 'Invalid verification token.' };
+  }
 }
 
 // Revoked session IDs set
@@ -316,14 +417,157 @@ function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFuncti
 }
 
 // ============================================================================
-// 6. ADMIN AUTHENTICATION API ROUTES
+// 6. TWO-STEP ADMIN AUTHENTICATION API ROUTES
 // ============================================================================
 
 /**
+ * STEP 1: Username & Password Verification
+ * POST /api/admin/login-step1 and /api/admin/auth/step1
+ * Verifies username and password against database/stored hash.
+ * If valid, returns a short-lived, HMAC-signed Step 1 Challenge Token.
+ * NEVER returns password hash or credential information.
+ */
+async function handleStep1Login(req: Request, res: Response): Promise<void> {
+  const clientIp = getClientIdentifier(req);
+  const { limited, retryAfterSeconds } = isRateLimited(clientIp);
+
+  if (limited) {
+    res.status(429).json({
+      error: `Too many attempts. Please wait ${retryAfterSeconds} seconds before trying again.`,
+    });
+    return;
+  }
+
+  const { username, password } = req.body || {};
+
+  if (
+    typeof username !== 'string' ||
+    typeof password !== 'string' ||
+    !username.trim() ||
+    !password
+  ) {
+    recordFailedAttempt(clientIp);
+    await new Promise((r) => setTimeout(r, 500));
+    res.status(401).json({ error: 'Invalid username or password.' });
+    return;
+  }
+
+  const cleanUsername = username.trim();
+  const adminRecord = await loadAdminRecord(cleanUsername);
+
+  if (!adminRecord || !adminRecord.is_active) {
+    recordFailedAttempt(clientIp);
+    dummyHashVerification(password);
+    await new Promise((r) => setTimeout(r, 500 + Math.random() * 200));
+    res.status(401).json({ error: 'Invalid username or password.' });
+    return;
+  }
+
+  const isPasswordValid = verifySecret(password, adminRecord.password_hash);
+
+  if (!isPasswordValid) {
+    recordFailedAttempt(clientIp);
+    await new Promise((r) => setTimeout(r, 500 + Math.random() * 200));
+    res.status(401).json({ error: 'Invalid username or password.' });
+    return;
+  }
+
+  // Step 1 Success: Issue a single-use 5-minute challenge token for Step 2
+  resetRateLimit(clientIp);
+  const step1Token = createStep1Token(adminRecord.username);
+
+  res.json({
+    success: true,
+    step: 1,
+    step1Token,
+    message: 'Step 1 verification successful. Please enter your security key.',
+  });
+}
+
+app.post('/api/admin/login-step1', handleStep1Login);
+app.post('/api/admin/auth/step1', handleStep1Login);
+
+/**
+ * STEP 2: Security Key Verification
+ * POST /api/admin/login-step2 and /api/admin/auth/step2
+ * Validates the single-use Step 1 Challenge Token and verifies the Security Key.
+ * Only after BOTH steps succeed is the full admin session established.
+ * NEVER returns security key hash or credentials.
+ */
+async function handleStep2Login(req: Request, res: Response): Promise<void> {
+  const clientIp = getClientIdentifier(req);
+  const { limited, retryAfterSeconds } = isRateLimited(clientIp);
+
+  if (limited) {
+    res.status(429).json({
+      error: `Too many attempts. Please wait ${retryAfterSeconds} seconds before trying again.`,
+    });
+    return;
+  }
+
+  const { step1Token, securityKey } = req.body || {};
+
+  if (
+    typeof step1Token !== 'string' ||
+    typeof securityKey !== 'string' ||
+    !step1Token.trim() ||
+    !securityKey.trim()
+  ) {
+    recordFailedAttempt(clientIp);
+    await new Promise((r) => setTimeout(r, 500));
+    res.status(401).json({ error: 'Invalid security key.' });
+    return;
+  }
+
+  // Verify and consume Step 1 Challenge Token
+  const step1Result = verifyStep1Token(step1Token.trim());
+  if (!step1Result.valid || !step1Result.username) {
+    recordFailedAttempt(clientIp);
+    await new Promise((r) => setTimeout(r, 500));
+    res.status(401).json({
+      error: step1Result.error || 'Verification session expired. Please start over from step 1.',
+      requiresStep1: true,
+    });
+    return;
+  }
+
+  const adminRecord = await loadAdminRecord(step1Result.username);
+  if (!adminRecord || !adminRecord.is_active) {
+    recordFailedAttempt(clientIp);
+    dummyHashVerification(securityKey);
+    await new Promise((r) => setTimeout(r, 500 + Math.random() * 200));
+    res.status(401).json({ error: 'Invalid security key.' });
+    return;
+  }
+
+  const isKeyValid = verifySecret(securityKey, adminRecord.security_key_hash);
+
+  if (!isKeyValid) {
+    recordFailedAttempt(clientIp);
+    await new Promise((r) => setTimeout(r, 500 + Math.random() * 200));
+    res.status(401).json({ error: 'Invalid security key.' });
+    return;
+  }
+
+  // Step 2 Success: Issue authenticated administrative session
+  resetRateLimit(clientIp);
+  const { token, expiresAt } = createSessionToken(adminRecord.username);
+
+  res.json({
+    success: true,
+    username: adminRecord.username,
+    token,
+    expiresAt,
+  });
+}
+
+app.post('/api/admin/login-step2', handleStep2Login);
+app.post('/api/admin/auth/step2', handleStep2Login);
+
+/**
+ * All-in-one Admin Login (For compatibility / direct verification)
  * POST /api/admin/login
- * Validates Username, Password, and Security Key.
- * Rate limited to 5 attempts per 15 minutes.
- * Returns signed session token on success.
+ * Performs server-side verification of Username, Password, and Security Key.
  */
 app.post('/api/admin/login', async (req: Request, res: Response) => {
   const clientIp = getClientIdentifier(req);
@@ -338,7 +582,6 @@ app.post('/api/admin/login', async (req: Request, res: Response) => {
 
   const { username, password, securityKey } = req.body || {};
 
-  // Validate presence
   if (
     typeof username !== 'string' ||
     typeof password !== 'string' ||
@@ -348,70 +591,33 @@ app.post('/api/admin/login', async (req: Request, res: Response) => {
     !securityKey
   ) {
     recordFailedAttempt(clientIp);
-    // Artificially delay response to thwart brute-force speed
-    await new Promise((r) => setTimeout(r, 600));
+    await new Promise((r) => setTimeout(r, 500));
     res.status(401).json({ error: 'Invalid login details.' });
     return;
   }
 
   const cleanUsername = username.trim();
-  let adminRecord = loadAdminCredentials();
+  const adminRecord = await loadAdminRecord(cleanUsername);
 
-  // If no administrator has been initialized yet in the secure credential store,
-  // the bakery owner sets their initial private credentials on first login.
-  if (!adminRecord) {
-    const passwordHash = hashSecret(password);
-    const securityKeyHash = hashSecret(securityKey);
-    const newRecord: StoredAdminRecord = {
-      id: crypto.randomUUID(),
-      username: cleanUsername,
-      password_hash: passwordHash,
-      security_key_hash: securityKeyHash,
-      is_active: true,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    saveAdminCredentials(newRecord);
-    adminRecord = newRecord;
-
-    resetRateLimit(clientIp);
-    const { token, expiresAt } = createSessionToken(cleanUsername);
-    res.json({
-      success: true,
-      username: cleanUsername,
-      token,
-      expiresAt,
-    });
-    return;
-  }
-
-  // Check username match
-  const isUsernameMatch =
-    adminRecord.is_active &&
-    adminRecord.username.toLowerCase() === cleanUsername.toLowerCase();
-
-  let isPasswordValid = false;
-  let isSecurityKeyValid = false;
-
-  if (isUsernameMatch) {
-    isPasswordValid = verifySecret(password, adminRecord.password_hash);
-    isSecurityKeyValid = verifySecret(securityKey, adminRecord.security_key_hash);
-  } else {
-    // Constant-time dummy hashes to prevent username enumeration timing
+  if (!adminRecord || !adminRecord.is_active) {
+    recordFailedAttempt(clientIp);
     dummyHashVerification(password);
     dummyHashVerification(securityKey);
-  }
-
-  // Artificial delay (400ms - 700ms)
-  await new Promise((r) => setTimeout(r, 400 + Math.random() * 300));
-
-  if (!isUsernameMatch || !isPasswordValid || !isSecurityKeyValid) {
-    recordFailedAttempt(clientIp);
+    await new Promise((r) => setTimeout(r, 500 + Math.random() * 200));
     res.status(401).json({ error: 'Invalid login details.' });
     return;
   }
 
-  // Success
+  const isPasswordValid = verifySecret(password, adminRecord.password_hash);
+  const isSecurityKeyValid = isPasswordValid && verifySecret(securityKey, adminRecord.security_key_hash);
+
+  if (!isPasswordValid || !isSecurityKeyValid) {
+    recordFailedAttempt(clientIp);
+    await new Promise((r) => setTimeout(r, 500 + Math.random() * 200));
+    res.status(401).json({ error: 'Invalid login details.' });
+    return;
+  }
+
   resetRateLimit(clientIp);
   const { token, expiresAt } = createSessionToken(adminRecord.username);
 
@@ -468,13 +674,20 @@ app.post('/api/admin/logout', (req: Request, res: Response) => {
 /**
  * POST /api/admin/credentials/update
  * Allows authenticated administrators to update their username, password, or security key.
+ * Requires current password verification and stores one-way cryptographic hashes only.
  */
 app.post('/api/admin/credentials/update', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { currentPassword, newUsername, newPassword, newSecurityKey } = req.body || {};
-    const adminRecord = loadAdminCredentials();
+    const sessionUsername = req.adminSession?.username;
+    if (!sessionUsername) {
+      res.status(401).json({ error: 'Session invalid.' });
+      return;
+    }
+
+    const adminRecord = await loadAdminRecord(sessionUsername);
     if (!adminRecord) {
-      res.status(404).json({ error: 'No administrator record found.' });
+      res.status(404).json({ error: 'Administrator record not found.' });
       return;
     }
 
@@ -490,14 +703,18 @@ app.post('/api/admin/credentials/update', requireAdmin, async (req: Authenticate
     if (newPassword && typeof newPassword === 'string' && newPassword.length >= 6) {
       adminRecord.password_hash = hashSecret(newPassword);
     }
-    if (newSecurityKey && typeof newSecurityKey === 'string' && newSecurityKey.length >= 6) {
+    if (newSecurityKey && typeof newSecurityKey === 'string' && newSecurityKey.length >= 4) {
       adminRecord.security_key_hash = hashSecret(newSecurityKey);
     }
 
     adminRecord.updated_at = new Date().toISOString();
-    saveAdminCredentials(adminRecord);
+    await saveAdminRecord(adminRecord);
 
-    res.json({ success: true, username: adminRecord.username, message: 'Credentials updated successfully.' });
+    res.json({
+      success: true,
+      username: adminRecord.username,
+      message: 'Credentials updated successfully.',
+    });
   } catch {
     res.status(500).json({ error: 'Failed to update credentials.' });
   }

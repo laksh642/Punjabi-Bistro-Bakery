@@ -10,10 +10,11 @@ export const DigitalQrMenuModal: React.FC = () => {
   if (!isMenuOnlyMode) return null;
 
   const filtered = products.filter((p) => {
+    if (!p || !p.name) return false;
     if (selectedCat !== 'all' && p.categoryId !== selectedCat) return false;
     if (search.trim()) {
       const q = search.toLowerCase();
-      return p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q);
+      return (p.name || '').toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q);
     }
     return true;
   });
