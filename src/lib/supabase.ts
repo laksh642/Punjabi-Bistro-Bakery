@@ -262,19 +262,12 @@ export async function fetchOrdersFromCloud(): Promise<Order[] | null> {
 export async function saveOrderToCloud(
   order: Order
 ): Promise<{ success: boolean; error?: string; order?: Order }> {
-  // STRICT: Verify customer authentication with Supabase
+  // Check if customer is authenticated with Supabase
   const { data: sessionData } = await supabase.auth.getSession();
   const session = sessionData?.session;
 
-  if (!session || !session.user) {
-    return {
-      success: false,
-      error: 'Customer sign-in with Google is required to place an order.',
-    };
-  }
-
-  const authenticatedUserId = session.user.id;
-  const authenticatedEmail = session.user.email || order.customerEmail;
+  const authenticatedUserId = session?.user?.id || order.userId || `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const authenticatedEmail = session?.user?.email || order.customerEmail || null;
   const token = order.trackingToken || generateTrackingToken();
 
   const confirmedOrder: Order = {
@@ -282,33 +275,35 @@ export async function saveOrderToCloud(
     id: order.id || `ord-${Date.now()}`,
     orderNumber: order.orderNumber || `PB-${Math.floor(1000 + Math.random() * 9000)}`,
     userId: authenticatedUserId,
-    customerEmail: authenticatedEmail,
+    customerEmail: authenticatedEmail || undefined,
     trackingToken: token,
     createdAt: order.createdAt || new Date().toISOString(),
   };
 
-  // Primary: Attempt fast server-side persistence via /api/orders with Bearer token
-  if (session.access_token) {
-    try {
-      const serverPromise = fetch('/api/orders', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify(confirmedOrder),
-      });
-
-      const res = await withTimeout(serverPromise, 5000);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.success && data.order) {
-          return { success: true, order: data.order };
-        }
-      }
-    } catch {
-      // Direct client persistence will handle it seamlessly
+  // Primary: Attempt fast server-side persistence via /api/orders
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (session?.access_token) {
+      headers['Authorization'] = `Bearer ${session.access_token}`;
     }
+
+    const serverPromise = fetch('/api/orders', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(confirmedOrder),
+    });
+
+    const res = await withTimeout(serverPromise, 5000);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success && data.order) {
+        return { success: true, order: data.order };
+      }
+    }
+  } catch {
+    // Direct client persistence will handle it seamlessly
   }
 
   // Direct Client-Side Supabase Persistence

@@ -1130,33 +1130,33 @@ const serverKnownMissingOrderCols = new Set<string>();
 /**
  * POST /api/orders
  * Resilient server-side persistence for customer orders.
- * STRICT: Requires valid Supabase Auth session token from authenticated customer.
- * Sets order.user_id = authenticated user ID to enforce strict ownership.
+ * Supports both Authenticated users and Guests.
  */
 app.post('/api/orders', async (req: Request, res: Response) => {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader ? authHeader.replace(/^Bearer\s+/i, '').trim() : '';
 
-    if (!token) {
-      res.status(401).json({ error: 'Customer sign-in with Google is required to place an order.' });
-      return;
-    }
+    let authenticatedUserId: string | null = null;
+    let authenticatedEmail: string | null = null;
 
-    // Verify token with Supabase Auth
-    const { data: userData, error: authErr } = await supabase.auth.getUser(token);
-    if (authErr || !userData?.user) {
-      res.status(401).json({ error: 'Valid customer sign-in with Google is required to place an order.' });
-      return;
+    if (token) {
+      // Verify token with Supabase Auth if provided
+      const { data: userData, error: authErr } = await supabase.auth.getUser(token);
+      if (!authErr && userData?.user) {
+        authenticatedUserId = userData.user.id;
+        authenticatedEmail = userData.user.email || null;
+      }
     }
-
-    const authenticatedUser = userData.user;
 
     const order = req.body;
     if (!order || !order.customerName || !order.customerPhone || !Array.isArray(order.items)) {
       res.status(400).json({ error: 'Invalid order data: customerName, customerPhone and items are required' });
       return;
     }
+
+    const finalUserId = authenticatedUserId || order.userId || `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const finalEmail = authenticatedEmail || order.customerEmail || null;
 
     const orderId = order.id || `ord-${Date.now()}`;
     const orderNumber = order.orderNumber || `PB-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -1167,21 +1167,18 @@ app.post('/api/orders', async (req: Request, res: Response) => {
       ...order.items.filter((i: any) => !i || !i._meta),
       {
         _meta: {
-          userId: authenticatedUser.id,
-          customerEmail: authenticatedUser.email || order.customerEmail || null,
+          userId: finalUserId,
+          customerEmail: finalEmail,
           trackingToken: trackingToken,
           orderNumber: orderNumber,
         },
       },
     ];
 
-    // Base payload matching guaranteed Supabase orders columns with verified user_id
+    // Base payload matching guaranteed Supabase orders columns
     const payload: Record<string, any> = {
       id: orderId,
       order_number: orderNumber,
-      tracking_token: trackingToken,
-      user_id: authenticatedUser.id,
-      customer_email: authenticatedUser.email || order.customerEmail || null,
       customer_name: order.customerName,
       customer_phone: order.customerPhone,
       order_type: order.orderType || 'delivery',
@@ -1254,8 +1251,8 @@ app.post('/api/orders', async (req: Request, res: Response) => {
       id: orderId,
       orderNumber,
       trackingToken,
-      userId: authenticatedUser.id,
-      customerEmail: authenticatedUser.email || order.customerEmail || undefined,
+      userId: finalUserId,
+      customerEmail: finalEmail || undefined,
       items: order.items.filter((i: any) => !i || !i._meta),
       status: payload.status,
       createdAt: payload.created_at,

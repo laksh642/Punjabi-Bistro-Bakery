@@ -842,18 +842,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const placeOrder = async (
     orderData: Omit<Order, 'id' | 'orderNumber' | 'createdAt' | 'status' | 'trackingToken'>
   ): Promise<{ success: boolean; order?: Order; error?: string }> => {
-    if (!orderData.userId) {
-      return {
-        success: false,
-        error: 'Customer sign-in with Google is required to place an order.',
-      };
-    }
+    const finalUserId = orderData.userId || `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
     const trackingToken = generateTrackingToken();
     const randomNum = Math.floor(1000 + Math.random() * 9000);
     const orderNumber = `PB-${randomNum}`;
     const newOrder: Order = {
       ...orderData,
+      userId: finalUserId,
       id: `ord-${Date.now()}`,
       orderNumber,
       trackingToken,
