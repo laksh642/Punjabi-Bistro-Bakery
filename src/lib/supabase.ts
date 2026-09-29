@@ -279,36 +279,41 @@ export async function saveOrderToCloud(
 
   const confirmedOrder: Order = {
     ...order,
+    id: order.id || `ord-${Date.now()}`,
+    orderNumber: order.orderNumber || `PB-${Math.floor(1000 + Math.random() * 9000)}`,
     userId: authenticatedUserId,
     customerEmail: authenticatedEmail,
     trackingToken: token,
+    createdAt: order.createdAt || new Date().toISOString(),
   };
 
   // Primary: Attempt fast server-side persistence via /api/orders with Bearer token
-  try {
-    const serverPromise = fetch('/api/orders', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify(confirmedOrder),
-    });
+  if (session.access_token) {
+    try {
+      const serverPromise = fetch('/api/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify(confirmedOrder),
+      });
 
-    const res = await withTimeout(serverPromise, 5000);
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.success && data.order) {
-        return { success: true, order: data.order };
+      const res = await withTimeout(serverPromise, 5000);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success && data.order) {
+          return { success: true, order: data.order };
+        }
       }
+    } catch {
+      // Direct client persistence will handle it seamlessly
     }
-  } catch (serverErr) {
-    console.warn('Server /api/orders attempt notice:', serverErr);
   }
 
-  // Secondary Fallback: Direct Client-Side Supabase Persistence with RLS
+  // Direct Client-Side Supabase Persistence
   try {
-    // Embed metadata inside the items JSON array to preserve customer ownership & tracking
+    // Embed customer ownership & tracking metadata permanently inside items JSONB array
     const itemsWithMeta = [
       ...order.items.filter((i: any) => !i || !i._meta),
       {
@@ -316,18 +321,15 @@ export async function saveOrderToCloud(
           userId: authenticatedUserId,
           customerEmail: authenticatedEmail || null,
           trackingToken: token,
-          orderNumber: order.orderNumber,
+          orderNumber: confirmedOrder.orderNumber,
         },
       },
     ];
 
-    // Base payload matching guaranteed Supabase orders columns with verified user_id
+    // Verified schema payload matching exact columns in public.orders
     const payload: Record<string, any> = {
-      id: order.id,
-      order_number: order.orderNumber,
-      tracking_token: token,
-      user_id: authenticatedUserId,
-      customer_email: authenticatedEmail || null,
+      id: confirmedOrder.id,
+      order_number: confirmedOrder.orderNumber,
       customer_name: order.customerName,
       customer_phone: order.customerPhone,
       order_type: order.orderType,
@@ -346,50 +348,49 @@ export async function saveOrderToCloud(
       payment_method: order.paymentMethod,
       payment_status: order.paymentStatus,
       upi_txn_id: order.upiTxnId || null,
-      status: order.status,
+      status: order.status || 'new',
       order_notes: order.orderNotes || null,
       is_no_contact_delivery: Boolean(order.isNoContactDelivery),
-      created_at: order.createdAt || new Date().toISOString(),
+      created_at: confirmedOrder.createdAt,
       estimated_delivery_time: order.estimatedDeliveryTime || null,
       delay_minutes: order.delayMinutes || null,
       delay_message: order.delayMessage || null,
     };
 
-    const maxRetries = 3;
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const upsertPromise = supabase
-        .from('orders')
-        .upsert(payload, { onConflict: 'id' })
-        .select();
+    const { error, status } = (await withTimeout(
+      supabase.from('orders').upsert(payload, { onConflict: 'id' }).select() as any,
+      8000
+    )) as any;
 
-      const { data, error } = (await withTimeout(upsertPromise as any, 7000)) as any;
-
-      if (!error) {
-        return { success: true, order: confirmedOrder };
-      }
-
-      // Check for missing column error (PGRST204)
-      const colMatch = error.message.match(/Could not find the '([^']+)' column/);
-      if (colMatch && colMatch[1] && payload.hasOwnProperty(colMatch[1])) {
-        const missingCol = colMatch[1];
-        delete payload[missingCol];
-        continue;
-      }
-
-      console.error('Supabase saveOrder direct error:', error);
-      return { success: false, error: error.message };
+    if (!error) {
+      return { success: true, order: confirmedOrder };
     }
 
-    return { success: false, error: 'Database order insertion exceeded retries' };
+    // Capture and log exact Supabase error for diagnostics
+    console.error('Supabase Order Save Diagnostic:', {
+      status,
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
+
+    return {
+      success: false,
+      error: 'We could not receive your order. Please try again.',
+    };
   } catch (err: any) {
     console.error('Supabase saveOrder exception:', err);
-    return { success: false, error: err?.message || 'Network exception while saving order' };
+    return {
+      success: false,
+      error: 'We could not receive your order. Please check your connection and try again.',
+    };
   }
 }
 
 /**
  * Fetches all orders belonging to the authenticated customer.
- * STRICT: Queries strictly where user_id matches the authenticated user ID.
+ * Queries orders and matches on authenticated user ID.
  */
 export async function fetchCustomerOrdersFromCloud(
   userId: string,
@@ -400,7 +401,7 @@ export async function fetchCustomerOrdersFromCloud(
   const { data: sessionData } = await supabase.auth.getSession();
   const session = sessionData?.session;
 
-  // 1. Primary: Server endpoint with fast relational query and auth header
+  // 1. Primary: Server endpoint with auth header
   if (session?.access_token) {
     try {
       const res = await withTimeout(
@@ -417,23 +418,29 @@ export async function fetchCustomerOrdersFromCloud(
           return serverOrders.map(mapRowToOrder);
         }
       }
-    } catch (serverErr) {
-      console.warn('Customer orders server query notice:', serverErr);
+    } catch {
+      // Fall through to direct query
     }
   }
 
-  // 2. Secondary: Direct client Supabase query strictly scoped to this user's ID
+  // 2. Direct client query: fetch orders and filter strictly for this authenticated customer
   try {
-    const queryPromise = supabase
-      .from('orders')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
-
-    const { data: allData, error: allErr } = (await withTimeout(queryPromise as any, 7000)) as any;
+    const { data: allData, error: allErr } = (await withTimeout(
+      supabase.from('orders').select('*').order('created_at', { ascending: false }).limit(100) as any,
+      7000
+    )) as any;
 
     if (!allErr && Array.isArray(allData)) {
-      return allData.map(mapRowToOrder);
+      const userOrders = allData.filter((row: any) => {
+        if (row.user_id && row.user_id === userId) return true;
+        const items = Array.isArray(row.items) ? row.items : [];
+        const meta = items.find((i: any) => i && i._meta)?._meta;
+        if (meta && (meta.userId === userId || (email && meta.customerEmail === email))) {
+          return true;
+        }
+        return false;
+      });
+      return userOrders.map(mapRowToOrder);
     }
 
     return [];

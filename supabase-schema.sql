@@ -151,7 +151,7 @@ CREATE TABLE IF NOT EXISTS public.products (
 );
 
 -- 6. Dedicated Admin Keys Table (Secure Server & Database Authentication)
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 
 CREATE TABLE IF NOT EXISTS public.admin_keys (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -171,21 +171,22 @@ REVOKE ALL ON TABLE public.admin_keys FROM anon, authenticated, public;
 -- Automatic Hashing Trigger:
 -- If an admin edits password_hash or security_key_hash in Supabase Table Editor using plaintext,
 -- this trigger automatically converts it to a secure bcrypt hash before saving to the table!
+-- FIX: SET search_path = public, extensions, pg_temp ensures extensions.gen_salt and extensions.crypt are found
 CREATE OR REPLACE FUNCTION public.hash_admin_keys_trigger()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = public, extensions, pg_temp
 AS $$
 BEGIN
   -- If password_hash is not already a bcrypt ($2a$, $2b$) or pbkdf2 hash, hash it with bcrypt
   IF NEW.password_hash IS NOT NULL AND NEW.password_hash !~ '^\$2[ab]\$' AND NEW.password_hash !~ '^pbkdf2\$' THEN
-    NEW.password_hash := crypt(NEW.password_hash, gen_salt('bf', 10));
+    NEW.password_hash := extensions.crypt(NEW.password_hash, extensions.gen_salt('bf', 10));
   END IF;
 
   -- If security_key_hash is not already a bcrypt or pbkdf2 hash, hash it with bcrypt
   IF NEW.security_key_hash IS NOT NULL AND NEW.security_key_hash !~ '^\$2[ab]\$' AND NEW.security_key_hash !~ '^pbkdf2\$' THEN
-    NEW.security_key_hash := crypt(NEW.security_key_hash, gen_salt('bf', 10));
+    NEW.security_key_hash := extensions.crypt(NEW.security_key_hash, extensions.gen_salt('bf', 10));
   END IF;
 
   NEW.updated_at := NOW();
@@ -209,7 +210,7 @@ CREATE OR REPLACE FUNCTION public.set_admin_credentials(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = public, extensions, pg_temp
 AS $$
 DECLARE
   v_user TEXT := lower(trim(p_username));
@@ -223,8 +224,8 @@ BEGIN
     RAISE EXCEPTION 'Security key must be at least 4 characters.';
   END IF;
 
-  v_pass_hash := crypt(trim(p_new_password), gen_salt('bf', 10));
-  v_key_hash := crypt(trim(p_new_security_key), gen_salt('bf', 10));
+  v_pass_hash := extensions.crypt(trim(p_new_password), extensions.gen_salt('bf', 10));
+  v_key_hash := extensions.crypt(trim(p_new_security_key), extensions.gen_salt('bf', 10));
 
   INSERT INTO public.admin_keys (username, password_hash, security_key_hash, updated_at)
   VALUES (v_user, v_pass_hash, v_key_hash, NOW())
@@ -240,6 +241,68 @@ $$;
 
 REVOKE ALL ON FUNCTION public.set_admin_credentials(TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 
+-- Dedicated One-Time Admin Recovery Tokens Table
+CREATE TABLE IF NOT EXISTS public.admin_recovery (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  token TEXT UNIQUE NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 minutes',
+  used BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+ALTER TABLE public.admin_recovery ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.admin_recovery FROM anon, authenticated, public;
+
+-- Function: Generate a single-use Emergency Admin Recovery Token from Supabase SQL Editor
+-- Usage: SELECT create_admin_recovery_token();
+CREATE OR REPLACE FUNCTION public.create_admin_recovery_token()
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions, pg_temp
+AS $$
+DECLARE
+  v_token TEXT;
+BEGIN
+  v_token := 'REC-' || upper(encode(extensions.gen_random_bytes(16), 'hex'));
+  INSERT INTO public.admin_recovery (token, expires_at)
+  VALUES (v_token, NOW() + INTERVAL '30 minutes');
+  RETURN v_token;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.create_admin_recovery_token() FROM PUBLIC, anon, authenticated;
+
+-- Function: Verify and consume emergency recovery token
+CREATE OR REPLACE FUNCTION public.admin_verify_and_consume_recovery_token(p_token TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions, pg_temp
+AS $$
+DECLARE
+  v_rec RECORD;
+BEGIN
+  SELECT id INTO v_rec
+  FROM public.admin_recovery
+  WHERE token = trim(p_token)
+    AND used = FALSE
+    AND expires_at > NOW();
+
+  IF v_rec IS NULL THEN
+    RETURN FALSE;
+  END IF;
+
+  UPDATE public.admin_recovery
+  SET used = TRUE
+  WHERE id = v_rec.id;
+
+  RETURN TRUE;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.admin_verify_and_consume_recovery_token(TEXT) TO anon, authenticated;
+
 -- Server verification endpoint Step 1 (Returns boolean only, never credentials or hashes)
 CREATE OR REPLACE FUNCTION public.auth_verify_admin_step1(
   p_username TEXT,
@@ -248,7 +311,7 @@ CREATE OR REPLACE FUNCTION public.auth_verify_admin_step1(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = public, extensions, pg_temp
 AS $$
 DECLARE
   v_rec RECORD;
@@ -265,7 +328,7 @@ BEGIN
   END IF;
 
   IF v_rec.password_hash ~ '^\$2[ab]\$' THEN
-    v_valid := (crypt(p_password_attempt, v_rec.password_hash) = v_rec.password_hash);
+    v_valid := (extensions.crypt(p_password_attempt, v_rec.password_hash) = v_rec.password_hash);
   END IF;
 
   IF v_valid THEN
@@ -284,7 +347,7 @@ CREATE OR REPLACE FUNCTION public.auth_verify_admin_step2(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = public, extensions, pg_temp
 AS $$
 DECLARE
   v_rec RECORD;
@@ -301,7 +364,7 @@ BEGIN
   END IF;
 
   IF v_rec.security_key_hash ~ '^\$2[ab]\$' THEN
-    v_valid := (crypt(p_security_key_attempt, v_rec.security_key_hash) = v_rec.security_key_hash);
+    v_valid := (extensions.crypt(p_security_key_attempt, v_rec.security_key_hash) = v_rec.security_key_hash);
   END IF;
 
   IF v_valid THEN

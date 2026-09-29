@@ -10,6 +10,7 @@ interface AdminAuthContextType {
   clearAuthError: () => void;
   loginStep1: (username: string, password: string) => Promise<{ success: boolean; step1Token?: string; error?: string }>;
   loginStep2: (step1Token: string, securityKey: string) => Promise<{ success: boolean; error?: string }>;
+  recoverAccount: (recoveryToken: string, newUsername: string, newPassword: string, newSecurityKey: string) => Promise<{ success: boolean; error?: string }>;
   login: (username: string, password: string, securityKey: string) => Promise<boolean>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
@@ -161,6 +162,51 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
+  const recoverAccount = async (
+    recoveryToken: string,
+    newUsername: string,
+    newPassword: string,
+    newSecurityKey: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    setAuthError(null);
+
+    try {
+      const res = await fetch('/api/admin/recover', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          recoveryToken,
+          newUsername,
+          newPassword,
+          newSecurityKey,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success || !data.token) {
+        const errorMsg = data.error || 'Failed to recover account. Please check your recovery key.';
+        setAuthError(errorMsg);
+        return { success: false, error: errorMsg };
+      }
+
+      try {
+        localStorage.setItem(ADMIN_TOKEN_KEY, data.token);
+      } catch {}
+
+      setIsAuthenticated(true);
+      setAdminUsername(data.username || newUsername);
+      setAuthError(null);
+      return { success: true };
+    } catch {
+      const errorMsg = 'Unable to reach authentication server. Please try again.';
+      setAuthError(errorMsg);
+      return { success: false, error: errorMsg };
+    }
+  };
+
   const login = async (
     username: string,
     password: string,
@@ -248,6 +294,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         clearAuthError,
         loginStep1,
         loginStep2,
+        recoverAccount,
         login,
         logout,
         refreshSession: verifySession,

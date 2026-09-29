@@ -453,6 +453,29 @@ async function handleStep1Login(req: Request, res: Response): Promise<void> {
   }
 
   const cleanUsername = username.trim();
+
+  // 1. Try Supabase RPC auth_verify_admin_step1 first
+  try {
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('auth_verify_admin_step1', {
+      p_username: cleanUsername,
+      p_password_attempt: password,
+    });
+    if (!rpcErr && rpcData && rpcData.success) {
+      resetRateLimit(clientIp);
+      const step1Token = createStep1Token(rpcData.username || cleanUsername);
+      res.json({
+        success: true,
+        step: 1,
+        step1Token,
+        message: 'Step 1 verification successful. Please enter your security key.',
+      });
+      return;
+    }
+  } catch {
+    // Fall through to local record verification
+  }
+
+  // 2. Local fallback verification
   const adminRecord = await loadAdminRecord(cleanUsername);
 
   if (!adminRecord || !adminRecord.is_active) {
@@ -531,6 +554,28 @@ async function handleStep2Login(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  // 1. Try Supabase RPC auth_verify_admin_step2 first
+  try {
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('auth_verify_admin_step2', {
+      p_username: step1Result.username,
+      p_security_key_attempt: securityKey,
+    });
+    if (!rpcErr && rpcData && rpcData.success) {
+      resetRateLimit(clientIp);
+      const { token, expiresAt } = createSessionToken(rpcData.username || step1Result.username);
+      res.json({
+        success: true,
+        username: rpcData.username || step1Result.username,
+        token,
+        expiresAt,
+      });
+      return;
+    }
+  } catch {
+    // Fall through to local record verification
+  }
+
+  // 2. Local fallback verification
   const adminRecord = await loadAdminRecord(step1Result.username);
   if (!adminRecord || !adminRecord.is_active) {
     recordFailedAttempt(clientIp);
@@ -563,6 +608,132 @@ async function handleStep2Login(req: Request, res: Response): Promise<void> {
 
 app.post('/api/admin/login-step2', handleStep2Login);
 app.post('/api/admin/auth/step2', handleStep2Login);
+
+/**
+ * POST /api/admin/recover
+ * Emergency admin account recovery and credential reset.
+ * Validates single-use recovery token from Supabase or local server file.
+ * Hashes new password and security key with bcrypt before saving.
+ * Immediately destroys the recovery token to prevent replay attacks.
+ */
+app.post('/api/admin/recover', async (req: Request, res: Response) => {
+  const clientIp = getClientIdentifier(req);
+  const { limited, retryAfterSeconds } = isRateLimited(clientIp);
+
+  if (limited) {
+    res.status(429).json({
+      error: `Too many attempts. Please wait ${retryAfterSeconds} seconds before trying again.`,
+    });
+    return;
+  }
+
+  const { recoveryToken, newUsername, newPassword, newSecurityKey } = req.body || {};
+
+  if (
+    typeof recoveryToken !== 'string' ||
+    typeof newUsername !== 'string' ||
+    typeof newPassword !== 'string' ||
+    typeof newSecurityKey !== 'string' ||
+    !recoveryToken.trim() ||
+    !newUsername.trim() ||
+    !newPassword ||
+    !newSecurityKey
+  ) {
+    recordFailedAttempt(clientIp);
+    res.status(400).json({ error: 'All fields are required for admin credential recovery.' });
+    return;
+  }
+
+  const cleanToken = recoveryToken.trim();
+  const cleanUsername = newUsername.trim().toLowerCase();
+
+  if (cleanUsername.length < 3) {
+    res.status(400).json({ error: 'Username must be at least 3 characters.' });
+    return;
+  }
+
+  if (newPassword.length < 6) {
+    res.status(400).json({ error: 'Password must be at least 6 characters.' });
+    return;
+  }
+
+  if (newSecurityKey.length < 4) {
+    res.status(400).json({ error: 'Security key must be at least 4 characters.' });
+    return;
+  }
+
+  let isTokenValid = false;
+
+  // 1. Check Supabase admin_verify_and_consume_recovery_token RPC
+  try {
+    const { data: dbValid, error: dbErr } = await supabase.rpc('admin_verify_and_consume_recovery_token', {
+      p_token: cleanToken,
+    });
+    if (!dbErr && dbValid === true) {
+      isTokenValid = true;
+    }
+  } catch {}
+
+  // 2. Check local server emergency recovery key file
+  const localRecoveryFile = path.join(DATA_DIR, 'admin-recovery.key');
+  if (!isTokenValid && fs.existsSync(localRecoveryFile)) {
+    try {
+      const storedKey = fs.readFileSync(localRecoveryFile, 'utf-8').trim();
+      if (storedKey && storedKey.toUpperCase() === cleanToken.toUpperCase()) {
+        isTokenValid = true;
+        // Single-use: immediately delete the recovery key file
+        try { fs.unlinkSync(localRecoveryFile); } catch {}
+      }
+    } catch {}
+  }
+
+  if (!isTokenValid) {
+    recordFailedAttempt(clientIp);
+    await new Promise((r) => setTimeout(r, 600));
+    res.status(401).json({ error: 'Invalid or expired recovery key.' });
+    return;
+  }
+
+  // Generate cryptographic bcrypt hashes
+  const passwordHash = hashSecret(newPassword);
+  const securityKeyHash = hashSecret(newSecurityKey);
+
+  const newAdminRecord: StoredAdminRecord = {
+    id: crypto.randomUUID(),
+    username: cleanUsername,
+    password_hash: passwordHash,
+    security_key_hash: securityKeyHash,
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  // Save to local secure store (0600 mode)
+  await saveAdminRecord(newAdminRecord);
+
+  // Sync to Supabase if set_admin_credentials exists
+  try {
+    await supabase.rpc('set_admin_credentials', {
+      p_username: cleanUsername,
+      p_new_password: newPassword,
+      p_new_security_key: newSecurityKey,
+    });
+  } catch {}
+
+  // Reset rate limits on success
+  resetRateLimit(clientIp);
+
+  // Issue authenticated admin session
+  const { token, expiresAt } = createSessionToken(cleanUsername);
+
+  res.json({
+    success: true,
+    username: cleanUsername,
+    token,
+    expiresAt,
+    message: 'Admin credentials successfully established. You are now logged in.',
+  });
+});
 
 /**
  * All-in-one Admin Login (For compatibility / direct verification)
@@ -954,6 +1125,7 @@ app.post('/api/admin/reviews/reply', requireAdmin, async (req: AuthenticatedRequ
 // ============================================================================
 // 7B. CUSTOMER ORDERS & TRACKING PERSISTENCE API
 // ============================================================================
+const serverKnownMissingOrderCols = new Set<string>();
 
 /**
  * POST /api/orders
@@ -1037,11 +1209,16 @@ app.post('/api/orders', async (req: Request, res: Response) => {
       delay_message: order.delayMessage || null,
     };
 
+    // Strip pre-identified missing columns immediately
+    for (const col of serverKnownMissingOrderCols) {
+      delete payload[col];
+    }
+
     // Upsert into Supabase with automatic column error recovery
     let saveError: string | null = null;
     let savedRow: any = null;
 
-    for (let attempt = 0; attempt < 4; attempt++) {
+    for (let attempt = 0; attempt < 20; attempt++) {
       const { data, error } = await supabase
         .from('orders')
         .upsert(payload, { onConflict: 'id' })
@@ -1055,8 +1232,10 @@ app.post('/api/orders', async (req: Request, res: Response) => {
 
       // Check for missing column error (PGRST204)
       const colMatch = error.message.match(/Could not find the '([^']+)' column/);
-      if (colMatch && colMatch[1] && payload.hasOwnProperty(colMatch[1])) {
-        delete payload[colMatch[1]];
+      if (colMatch && colMatch[1]) {
+        const missingCol = colMatch[1];
+        serverKnownMissingOrderCols.add(missingCol);
+        delete payload[missingCol];
         continue;
       }
 
