@@ -33,6 +33,7 @@ import {
   KeyRound,
 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
+import { useAdminAuth } from '../context/AdminAuthContext';
 import { Order, OrderStatus, Product, CustomCakeEnquiry, DeliveryZone } from '../types';
 import { PunjabiBistroLogo } from './PunjabiBistroLogo';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
@@ -65,6 +66,7 @@ export const AdminDashboard: React.FC = () => {
     isCloudSyncing,
     syncWithCloud,
   } = useStore();
+  const { updatePassword } = useAdminAuth();
 
   // Load cloud orders on Admin Dashboard mount and listen to changes
   useEffect(() => {
@@ -224,66 +226,36 @@ export const AdminDashboard: React.FC = () => {
 
   const handleUpdateCredentials = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!credCurrentPassword) {
-      setCredStatusMsg({ type: 'error', text: 'Please enter your current password to authorize changes.' });
+    if (!credNewPassword) {
+      setCredStatusMsg({ type: 'error', text: 'Please enter your new administrator password.' });
       return;
     }
-    if (credNewPassword && credNewPassword.length < 6) {
+    if (credNewPassword.length < 6) {
       setCredStatusMsg({ type: 'error', text: 'New password must be at least 6 characters.' });
       return;
     }
-    if (credNewPassword && credNewPassword !== credConfirmPassword) {
+    if (credNewPassword !== credConfirmPassword) {
       setCredStatusMsg({ type: 'error', text: 'New password and confirmation password do not match.' });
-      return;
-    }
-    if (credNewSecurityKey && credNewSecurityKey.length < 4) {
-      setCredStatusMsg({ type: 'error', text: 'New security key must be at least 4 characters.' });
-      return;
-    }
-    if (credNewSecurityKey && credNewSecurityKey !== credConfirmSecurityKey) {
-      setCredStatusMsg({ type: 'error', text: 'New security key and confirmation security key do not match.' });
-      return;
-    }
-
-    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('pb_admin_session_token') : null;
-    if (!token) {
-      setCredStatusMsg({ type: 'error', text: 'Admin session missing. Please re-login.' });
       return;
     }
 
     setCredLoading(true);
     setCredStatusMsg(null);
     try {
-      const res = await fetch('/api/admin/credentials/update', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          currentPassword: credCurrentPassword,
-          newUsername: credNewUsername.trim() || undefined,
-          newPassword: credNewPassword || undefined,
-          newSecurityKey: credNewSecurityKey || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setCredStatusMsg({ type: 'error', text: data.error || 'Failed to update credentials.' });
+      const res = await updatePassword(credNewPassword);
+      if (!res.success) {
+        setCredStatusMsg({ type: 'error', text: res.error || 'Failed to update password in Supabase.' });
       } else {
-        setCredStatusMsg({ type: 'success', text: 'Credentials updated successfully!' });
+        setCredStatusMsg({ type: 'success', text: 'Administrator password updated successfully in Supabase Auth!' });
         setCredCurrentPassword('');
         setCredNewUsername('');
         setCredNewPassword('');
         setCredConfirmPassword('');
         setCredNewSecurityKey('');
         setCredConfirmSecurityKey('');
-        if (data.username) {
-          localStorage.setItem('pb_admin_username', data.username);
-        }
       }
-    } catch {
-      setCredStatusMsg({ type: 'error', text: 'Network error communicating with server.' });
+    } catch (err: any) {
+      setCredStatusMsg({ type: 'error', text: err?.message || 'Error updating password.' });
     } finally {
       setCredLoading(false);
     }
@@ -1163,11 +1135,11 @@ export const AdminDashboard: React.FC = () => {
               <div className="flex items-center gap-2 mb-1">
                 <KeyRound className="w-5 h-5 text-emerald-700" />
                 <h3 className="font-serif font-bold text-lg text-emerald-950">
-                  Update Administrator Credentials
+                  Update Administrator Password
                 </h3>
               </div>
               <p className="text-xs text-stone-600 mb-5">
-                Customize your portal login credentials anytime. Requires your current password to authorize updates.
+                Update your Supabase Auth administrator password anytime. It takes effect immediately across all sessions.
               </p>
 
               {credStatusMsg && (
@@ -1187,101 +1159,42 @@ export const AdminDashboard: React.FC = () => {
                 </div>
               )}
 
-              <form onSubmit={handleUpdateCredentials} className="space-y-4 max-w-xl">
+              <form onSubmit={handleUpdateCredentials} className="space-y-4 max-w-md">
                 <div>
                   <label className="block text-xs font-semibold text-stone-700 mb-1">
-                    Current Password <span className="text-rose-600">*</span>
+                    New Password <span className="text-rose-600">*</span>
                   </label>
                   <input
                     type="password"
                     required
-                    placeholder="Enter current password to authorize"
-                    value={credCurrentPassword}
-                    onChange={(e) => setCredCurrentPassword(e.target.value)}
+                    placeholder="Min 6 characters"
+                    value={credNewPassword}
+                    onChange={(e) => setCredNewPassword(e.target.value)}
                     className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:border-emerald-600"
                   />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                  <div>
-                    <label className="block text-xs font-semibold text-stone-700 mb-1">
-                      New Username (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Leave blank to keep unchanged"
-                      value={credNewUsername}
-                      onChange={(e) => setCredNewUsername(e.target.value)}
-                      className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:border-emerald-600"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-stone-700 mb-1">
-                      New Password (Optional)
-                    </label>
-                    <input
-                      type="password"
-                      placeholder="Min 6 characters"
-                      value={credNewPassword}
-                      onChange={(e) => setCredNewPassword(e.target.value)}
-                      className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:border-emerald-600"
-                    />
-                  </div>
-                </div>
-
-                {credNewPassword && (
-                  <div>
-                    <label className="block text-xs font-semibold text-stone-700 mb-1">
-                      Confirm New Password <span className="text-rose-600">*</span>
-                    </label>
-                    <input
-                      type="password"
-                      placeholder="Re-enter new password to confirm"
-                      value={credConfirmPassword}
-                      onChange={(e) => setCredConfirmPassword(e.target.value)}
-                      className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:border-emerald-600"
-                    />
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-stone-700 mb-1">
-                      New Security Key (Optional)
-                    </label>
-                    <input
-                      type="password"
-                      placeholder="Min 4 characters (leave blank to keep unchanged)"
-                      value={credNewSecurityKey}
-                      onChange={(e) => setCredNewSecurityKey(e.target.value)}
-                      className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:border-emerald-600"
-                    />
-                  </div>
-
-                  {credNewSecurityKey ? (
-                    <div>
-                      <label className="block text-xs font-semibold text-stone-700 mb-1">
-                        Confirm Security Key <span className="text-rose-600">*</span>
-                      </label>
-                      <input
-                        type="password"
-                        placeholder="Re-enter new security key"
-                        value={credConfirmSecurityKey}
-                        onChange={(e) => setCredConfirmSecurityKey(e.target.value)}
-                        className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:border-emerald-600"
-                      />
-                    </div>
-                  ) : null}
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">
+                    Confirm New Password <span className="text-rose-600">*</span>
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="Re-enter new password to confirm"
+                    value={credConfirmPassword}
+                    onChange={(e) => setCredConfirmPassword(e.target.value)}
+                    className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:border-emerald-600"
+                  />
                 </div>
 
                 <div className="pt-2">
                   <button
                     type="submit"
                     disabled={credLoading}
-                    className="px-5 py-2.5 rounded-xl bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                    className="px-5 py-2.5 rounded-xl bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors disabled:opacity-50 inline-flex items-center gap-2 cursor-pointer"
                   >
-                    {credLoading ? 'Saving...' : 'Save New Credentials'}
+                    {credLoading ? 'Updating in Supabase...' : 'Save New Password'}
                   </button>
                 </div>
               </form>

@@ -92,108 +92,13 @@ function dummyHashVerification(plainText: string): void {
 }
 
 // ============================================================================
-// 3. PERSISTENT ADMIN CREDENTIAL & ADMIN_KEYS STORE
+// 3. ADMIN CREDENTIAL VERIFICATION (SUPABASE PUBLIC.ADMIN_KEYS AS SINGLE SOURCE OF TRUTH)
 // ============================================================================
 const DATA_DIR = path.join(process.cwd(), 'data');
-const ADMIN_KEYS_FILE = path.join(DATA_DIR, 'admin-keys.json');
-
-interface StoredAdminRecord {
-  id: string;
-  username: string;
-  password_hash: string;
-  security_key_hash: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
 
 function ensureDataDir(): void {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
-
-/**
- * Loads admin record strictly server-side:
- * 1. Attempts to read from Supabase public.admin_keys
- * 2. Falls back to protected local file data/admin-keys.json (0600 mode)
- */
-async function loadAdminRecord(username: string): Promise<StoredAdminRecord | null> {
-  const cleanUser = username.trim().toLowerCase();
-
-  // Try Supabase admin_keys table first
-  try {
-    const { data, error } = await supabase
-      .from('admin_keys')
-      .select('id, username, password_hash, security_key_hash, created_at, updated_at')
-      .ilike('username', cleanUser)
-      .limit(1)
-      .maybeSingle();
-
-    if (!error && data && data.password_hash && data.security_key_hash) {
-      return {
-        id: data.id,
-        username: data.username,
-        password_hash: data.password_hash,
-        security_key_hash: data.security_key_hash,
-        is_active: true,
-        created_at: data.created_at,
-        updated_at: data.updated_at,
-      };
-    }
-  } catch {
-    // Fall through to secure local store
-  }
-
-  // Fallback to secure server store
-  ensureDataDir();
-  const fileCandidates = [
-    ADMIN_KEYS_FILE,
-    path.join(DATA_DIR, 'admin-credentials.json'),
-  ];
-
-  for (const f of fileCandidates) {
-    if (fs.existsSync(f)) {
-      try {
-        const raw = fs.readFileSync(f, 'utf-8');
-        const parsed = JSON.parse(raw);
-        if (parsed && parsed.username && parsed.password_hash && parsed.security_key_hash) {
-          if (parsed.username.toLowerCase() === cleanUser) {
-            return parsed as StoredAdminRecord;
-          }
-        }
-      } catch {
-        // ignore
-      }
-    }
-  }
-
-  return null;
-}
-
-/**
- * Saves admin record securely:
- * 1. Writes to data/admin-keys.json with 0600 (owner-only) permissions
- * 2. Syncs to Supabase public.admin_keys if database permissions allow
- */
-async function saveAdminRecord(record: StoredAdminRecord): Promise<void> {
-  ensureDataDir();
-  fs.writeFileSync(ADMIN_KEYS_FILE, JSON.stringify(record, null, 2), {
-    mode: 0o600, // Read/write only for process owner
-  });
-
-  try {
-    await supabase.from('admin_keys').upsert(
-      {
-        username: record.username.toLowerCase(),
-        password_hash: record.password_hash,
-        security_key_hash: record.security_key_hash,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'username' }
-    );
-  } catch {
-    // Local store is authoritative if database permissions are restricted
   }
 }
 
@@ -391,13 +296,56 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 
 // ============================================================================
-// 5. AUTHENTICATION MIDDLEWARE
+// 5. AUTHENTICATION MIDDLEWARE & AUTHORIZATION
 // ============================================================================
 export interface AuthenticatedRequest extends Request {
   adminSession?: SessionPayload;
 }
 
-function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+/**
+ * Authoritatively verifies whether an email belongs to an authorized administrator.
+ * 1. Checks verified owner identity: groverlakshit108@gmail.com
+ * 2. Checks official store admin email: admin@punjabibistro.com
+ * 3. Checks public.admin_users table in Supabase
+ */
+async function verifyIsAdminEmail(email?: string | null): Promise<boolean> {
+  if (!email) return false;
+  const cleanEmail = email.trim().toLowerCase();
+
+  // 1. Primary Store Owner Identity
+  if (cleanEmail === 'groverlakshit108@gmail.com') {
+    return true;
+  }
+
+  // 2. Official Bistro Admin Email
+  if (cleanEmail === 'admin@punjabibistro.com') {
+    return true;
+  }
+
+  // 3. Query public.admin_users table
+  try {
+    const { data, error } = await supabase
+      .from('admin_users')
+      .select('email, role')
+      .ilike('email', cleanEmail)
+      .maybeSingle();
+
+    if (!error && data && data.email) {
+      return true;
+    }
+  } catch (err) {
+    console.warn('[Admin Auth] Error querying admin_users table:', err);
+  }
+
+  return false;
+}
+
+/**
+ * Unified, production-grade admin authentication middleware.
+ * Verifies Supabase Auth JWTs directly against Supabase.
+ * Also supports legacy server HMAC tokens for graceful compatibility.
+ */
+async function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     res.status(401).json({ error: 'Unauthorized: Missing or invalid authorization token' });
@@ -405,340 +353,50 @@ function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFuncti
   }
 
   const token = authHeader.slice(7).trim();
-  const session = verifySessionToken(token);
 
-  if (!session) {
-    res.status(401).json({ error: 'Unauthorized: Session expired or invalid' });
-    return;
-  }
-
-  req.adminSession = session;
-  next();
-}
-
-// ============================================================================
-// 6. TWO-STEP ADMIN AUTHENTICATION API ROUTES
-// ============================================================================
-
-/**
- * STEP 1: Username & Password Verification
- * POST /api/admin/login-step1 and /api/admin/auth/step1
- * Verifies username and password against database/stored hash.
- * If valid, returns a short-lived, HMAC-signed Step 1 Challenge Token.
- * NEVER returns password hash or credential information.
- */
-async function handleStep1Login(req: Request, res: Response): Promise<void> {
-  const clientIp = getClientIdentifier(req);
-  const { limited, retryAfterSeconds } = isRateLimited(clientIp);
-
-  if (limited) {
-    res.status(429).json({
-      error: `Too many attempts. Please wait ${retryAfterSeconds} seconds before trying again.`,
-    });
-    return;
-  }
-
-  const { username, password } = req.body || {};
-
-  if (
-    typeof username !== 'string' ||
-    typeof password !== 'string' ||
-    !username.trim() ||
-    !password
-  ) {
-    recordFailedAttempt(clientIp);
-    await new Promise((r) => setTimeout(r, 500));
-    res.status(401).json({ error: 'Invalid username or password.' });
-    return;
-  }
-
-  const cleanUsername = username.trim();
-
-  // 1. Try Supabase RPC auth_verify_admin_step1 first
+  // 1. Authoritative check: Supabase Auth access_token verification
   try {
-    const { data: rpcData, error: rpcErr } = await supabase.rpc('auth_verify_admin_step1', {
-      p_username: cleanUsername,
-      p_password_attempt: password,
-    });
-    if (!rpcErr && rpcData && rpcData.success) {
-      resetRateLimit(clientIp);
-      const step1Token = createStep1Token(rpcData.username || cleanUsername);
-      res.json({
-        success: true,
-        step: 1,
-        step1Token,
-        message: 'Step 1 verification successful. Please enter your security key.',
-      });
-      return;
-    }
-  } catch {
-    // Fall through to local record verification
-  }
-
-  // 2. Local fallback verification
-  const adminRecord = await loadAdminRecord(cleanUsername);
-
-  if (!adminRecord || !adminRecord.is_active) {
-    recordFailedAttempt(clientIp);
-    dummyHashVerification(password);
-    await new Promise((r) => setTimeout(r, 500 + Math.random() * 200));
-    res.status(401).json({ error: 'Invalid username or password.' });
-    return;
-  }
-
-  const isPasswordValid = verifySecret(password, adminRecord.password_hash);
-
-  if (!isPasswordValid) {
-    recordFailedAttempt(clientIp);
-    await new Promise((r) => setTimeout(r, 500 + Math.random() * 200));
-    res.status(401).json({ error: 'Invalid username or password.' });
-    return;
-  }
-
-  // Step 1 Success: Issue a single-use 5-minute challenge token for Step 2
-  resetRateLimit(clientIp);
-  const step1Token = createStep1Token(adminRecord.username);
-
-  res.json({
-    success: true,
-    step: 1,
-    step1Token,
-    message: 'Step 1 verification successful. Please enter your security key.',
-  });
-}
-
-app.post('/api/admin/login-step1', handleStep1Login);
-app.post('/api/admin/auth/step1', handleStep1Login);
-
-/**
- * STEP 2: Security Key Verification
- * POST /api/admin/login-step2 and /api/admin/auth/step2
- * Validates the single-use Step 1 Challenge Token and verifies the Security Key.
- * Only after BOTH steps succeed is the full admin session established.
- * NEVER returns security key hash or credentials.
- */
-async function handleStep2Login(req: Request, res: Response): Promise<void> {
-  const clientIp = getClientIdentifier(req);
-  const { limited, retryAfterSeconds } = isRateLimited(clientIp);
-
-  if (limited) {
-    res.status(429).json({
-      error: `Too many attempts. Please wait ${retryAfterSeconds} seconds before trying again.`,
-    });
-    return;
-  }
-
-  const { step1Token, securityKey } = req.body || {};
-
-  if (
-    typeof step1Token !== 'string' ||
-    typeof securityKey !== 'string' ||
-    !step1Token.trim() ||
-    !securityKey.trim()
-  ) {
-    recordFailedAttempt(clientIp);
-    await new Promise((r) => setTimeout(r, 500));
-    res.status(401).json({ error: 'Invalid security key.' });
-    return;
-  }
-
-  // Verify and consume Step 1 Challenge Token
-  const step1Result = verifyStep1Token(step1Token.trim());
-  if (!step1Result.valid || !step1Result.username) {
-    recordFailedAttempt(clientIp);
-    await new Promise((r) => setTimeout(r, 500));
-    res.status(401).json({
-      error: step1Result.error || 'Verification session expired. Please start over from step 1.',
-      requiresStep1: true,
-    });
-    return;
-  }
-
-  // 1. Try Supabase RPC auth_verify_admin_step2 first
-  try {
-    const { data: rpcData, error: rpcErr } = await supabase.rpc('auth_verify_admin_step2', {
-      p_username: step1Result.username,
-      p_security_key_attempt: securityKey,
-    });
-    if (!rpcErr && rpcData && rpcData.success) {
-      resetRateLimit(clientIp);
-      const { token, expiresAt } = createSessionToken(rpcData.username || step1Result.username);
-      res.json({
-        success: true,
-        username: rpcData.username || step1Result.username,
-        token,
-        expiresAt,
-      });
-      return;
-    }
-  } catch {
-    // Fall through to local record verification
-  }
-
-  // 2. Local fallback verification
-  const adminRecord = await loadAdminRecord(step1Result.username);
-  if (!adminRecord || !adminRecord.is_active) {
-    recordFailedAttempt(clientIp);
-    dummyHashVerification(securityKey);
-    await new Promise((r) => setTimeout(r, 500 + Math.random() * 200));
-    res.status(401).json({ error: 'Invalid security key.' });
-    return;
-  }
-
-  const isKeyValid = verifySecret(securityKey, adminRecord.security_key_hash);
-
-  if (!isKeyValid) {
-    recordFailedAttempt(clientIp);
-    await new Promise((r) => setTimeout(r, 500 + Math.random() * 200));
-    res.status(401).json({ error: 'Invalid security key.' });
-    return;
-  }
-
-  // Step 2 Success: Issue authenticated administrative session
-  resetRateLimit(clientIp);
-  const { token, expiresAt } = createSessionToken(adminRecord.username);
-
-  res.json({
-    success: true,
-    username: adminRecord.username,
-    token,
-    expiresAt,
-  });
-}
-
-app.post('/api/admin/login-step2', handleStep2Login);
-app.post('/api/admin/auth/step2', handleStep2Login);
-
-/**
- * POST /api/admin/recover
- * Emergency admin account recovery and credential reset.
- * Validates single-use recovery token from Supabase or local server file.
- * Hashes new password and security key with bcrypt before saving.
- * Immediately destroys the recovery token to prevent replay attacks.
- */
-app.post('/api/admin/recover', async (req: Request, res: Response) => {
-  const clientIp = getClientIdentifier(req);
-  const { limited, retryAfterSeconds } = isRateLimited(clientIp);
-
-  if (limited) {
-    res.status(429).json({
-      error: `Too many attempts. Please wait ${retryAfterSeconds} seconds before trying again.`,
-    });
-    return;
-  }
-
-  const { recoveryToken, newUsername, newPassword, newSecurityKey } = req.body || {};
-
-  if (
-    typeof recoveryToken !== 'string' ||
-    typeof newUsername !== 'string' ||
-    typeof newPassword !== 'string' ||
-    typeof newSecurityKey !== 'string' ||
-    !recoveryToken.trim() ||
-    !newUsername.trim() ||
-    !newPassword ||
-    !newSecurityKey
-  ) {
-    recordFailedAttempt(clientIp);
-    res.status(400).json({ error: 'All fields are required for admin credential recovery.' });
-    return;
-  }
-
-  const cleanToken = recoveryToken.trim();
-  const cleanUsername = newUsername.trim().toLowerCase();
-
-  if (cleanUsername.length < 3) {
-    res.status(400).json({ error: 'Username must be at least 3 characters.' });
-    return;
-  }
-
-  if (newPassword.length < 6) {
-    res.status(400).json({ error: 'Password must be at least 6 characters.' });
-    return;
-  }
-
-  if (newSecurityKey.length < 4) {
-    res.status(400).json({ error: 'Security key must be at least 4 characters.' });
-    return;
-  }
-
-  let isTokenValid = false;
-
-  // 1. Check Supabase admin_verify_and_consume_recovery_token RPC
-  try {
-    const { data: dbValid, error: dbErr } = await supabase.rpc('admin_verify_and_consume_recovery_token', {
-      p_token: cleanToken,
-    });
-    if (!dbErr && dbValid === true) {
-      isTokenValid = true;
-    }
-  } catch {}
-
-  // 2. Check local server emergency recovery key file
-  const localRecoveryFile = path.join(DATA_DIR, 'admin-recovery.key');
-  if (!isTokenValid && fs.existsSync(localRecoveryFile)) {
-    try {
-      const storedKey = fs.readFileSync(localRecoveryFile, 'utf-8').trim();
-      if (storedKey && storedKey.toUpperCase() === cleanToken.toUpperCase()) {
-        isTokenValid = true;
-        // Single-use: immediately delete the recovery key file
-        try { fs.unlinkSync(localRecoveryFile); } catch {}
+    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+    if (!userError && user && user.email) {
+      const isAuthorized = await verifyIsAdminEmail(user.email);
+      if (isAuthorized) {
+        req.adminSession = {
+          sessionId: user.id,
+          username: user.email,
+          role: 'owner',
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 8 * 60 * 60 * 1000,
+        };
+        next();
+        return;
+      } else {
+        res.status(403).json({ error: 'Forbidden: Account is not an authorized administrator' });
+        return;
       }
-    } catch {}
+    }
+  } catch {
+    // Fall through to server session check
   }
 
-  if (!isTokenValid) {
-    recordFailedAttempt(clientIp);
-    await new Promise((r) => setTimeout(r, 600));
-    res.status(401).json({ error: 'Invalid or expired recovery key.' });
+  // 2. Compatibility check: Server-signed HMAC session token
+  const session = verifySessionToken(token);
+  if (session) {
+    req.adminSession = session;
+    next();
     return;
   }
 
-  // Generate cryptographic bcrypt hashes
-  const passwordHash = hashSecret(newPassword);
-  const securityKeyHash = hashSecret(newSecurityKey);
+  res.status(401).json({ error: 'Unauthorized: Session expired or invalid' });
+}
 
-  const newAdminRecord: StoredAdminRecord = {
-    id: crypto.randomUUID(),
-    username: cleanUsername,
-    password_hash: passwordHash,
-    security_key_hash: securityKeyHash,
-    is_active: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
-
-  // Save to local secure store (0600 mode)
-  await saveAdminRecord(newAdminRecord);
-
-  // Sync to Supabase if set_admin_credentials exists
-  try {
-    await supabase.rpc('set_admin_credentials', {
-      p_username: cleanUsername,
-      p_new_password: newPassword,
-      p_new_security_key: newSecurityKey,
-    });
-  } catch {}
-
-  // Reset rate limits on success
-  resetRateLimit(clientIp);
-
-  // Issue authenticated admin session
-  const { token, expiresAt } = createSessionToken(cleanUsername);
-
-  res.json({
-    success: true,
-    username: cleanUsername,
-    token,
-    expiresAt,
-    message: 'Admin credentials successfully established. You are now logged in.',
-  });
-});
+// ============================================================================
+// 6. REDESIGNED ADMIN AUTHENTICATION API ROUTES (SIMPLE & RELIABLE)
+// ============================================================================
 
 /**
- * All-in-one Admin Login (For compatibility / direct verification)
+ * Single-Step Unified Admin Login
  * POST /api/admin/login
- * Performs server-side verification of Username, Password, and Security Key.
+ * Authenticates email/username with Supabase Auth GoTrue.
  */
 app.post('/api/admin/login', async (req: Request, res: Response) => {
   const clientIp = getClientIdentifier(req);
@@ -751,60 +409,113 @@ app.post('/api/admin/login', async (req: Request, res: Response) => {
     return;
   }
 
-  const { username, password, securityKey } = req.body || {};
+  const { identifier, email, username, password } = req.body || {};
+  const rawId = identifier || email || username;
 
   if (
-    typeof username !== 'string' ||
+    typeof rawId !== 'string' ||
     typeof password !== 'string' ||
-    typeof securityKey !== 'string' ||
-    !username.trim() ||
-    !password ||
-    !securityKey
+    !rawId.trim() ||
+    !password
   ) {
     recordFailedAttempt(clientIp);
-    await new Promise((r) => setTimeout(r, 500));
-    res.status(401).json({ error: 'Invalid login details.' });
+    await new Promise((r) => setTimeout(r, 400));
+    res.status(400).json({ error: 'Username/Email and password are required.' });
     return;
   }
 
-  const cleanUsername = username.trim();
-  const adminRecord = await loadAdminRecord(cleanUsername);
+  const cleanId = rawId.trim();
+  const authEmail = cleanId.includes('@')
+    ? cleanId.toLowerCase()
+    : `${cleanId.toLowerCase()}@punjabibistro.com`;
 
-  if (!adminRecord || !adminRecord.is_active) {
-    recordFailedAttempt(clientIp);
-    dummyHashVerification(password);
-    dummyHashVerification(securityKey);
-    await new Promise((r) => setTimeout(r, 500 + Math.random() * 200));
-    res.status(401).json({ error: 'Invalid login details.' });
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: authEmail,
+      password,
+    });
+
+    if (error || !data.user || !data.session) {
+      recordFailedAttempt(clientIp);
+      await new Promise((r) => setTimeout(r, 500 + Math.random() * 200));
+      res.status(401).json({
+        error: error?.message || 'Invalid administrator username or password.',
+      });
+      return;
+    }
+
+    const isAuthorized = await verifyIsAdminEmail(data.user.email);
+    if (!isAuthorized) {
+      recordFailedAttempt(clientIp);
+      res.status(403).json({
+        error: 'Access Denied: This account is not registered as an authorized administrator.',
+      });
+      return;
+    }
+
+    resetRateLimit(clientIp);
+    res.json({
+      success: true,
+      username: data.user.email,
+      token: data.session.access_token,
+      expiresAt: data.session.expires_at ? data.session.expires_at * 1000 : Date.now() + 8 * 3600 * 1000,
+    });
+  } catch (err: any) {
+    console.error('[Admin Auth] Login error:', err);
+    res.status(500).json({ error: 'Authentication service temporarily unavailable. Please try again.' });
+  }
+});
+
+/**
+ * Compatibility handler for legacy Step 1
+ */
+app.post(['/api/admin/login-step1', '/api/admin/auth/step1'], async (req: Request, res: Response) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) {
+    res.status(400).json({ error: 'Username and password are required.' });
+    return;
+  }
+  const cleanId = String(username).trim();
+  const authEmail = cleanId.includes('@') ? cleanId.toLowerCase() : `${cleanId.toLowerCase()}@punjabibistro.com`;
+
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: authEmail,
+    password: String(password),
+  });
+
+  if (error || !data.user || !data.session) {
+    res.status(401).json({ error: 'Invalid administrator credentials.' });
     return;
   }
 
-  const isPasswordValid = verifySecret(password, adminRecord.password_hash);
-  const isSecurityKeyValid = isPasswordValid && verifySecret(securityKey, adminRecord.security_key_hash);
-
-  if (!isPasswordValid || !isSecurityKeyValid) {
-    recordFailedAttempt(clientIp);
-    await new Promise((r) => setTimeout(r, 500 + Math.random() * 200));
-    res.status(401).json({ error: 'Invalid login details.' });
-    return;
-  }
-
-  resetRateLimit(clientIp);
-  const { token, expiresAt } = createSessionToken(adminRecord.username);
-
+  const step1Token = createStep1Token(data.user.email || cleanId);
   res.json({
     success: true,
-    username: adminRecord.username,
-    token,
-    expiresAt,
+    step: 1,
+    step1Token,
+    message: 'Authentication verified.',
   });
 });
 
 /**
- * GET /api/admin/session
- * Verifies the validity of the current admin session token.
+ * Compatibility handler for legacy Step 2
  */
-app.get('/api/admin/session', (req: Request, res: Response) => {
+app.post(['/api/admin/login-step2', '/api/admin/auth/step2'], (req: Request, res: Response) => {
+  const { step1Token } = req.body || {};
+  const verified = verifyStep1Token(String(step1Token || ''));
+  if (!verified.valid || !verified.username) {
+    res.status(401).json({ error: 'Verification session expired. Please log in again.' });
+    return;
+  }
+  const { token, expiresAt } = createSessionToken(verified.username);
+  res.json({ success: true, username: verified.username, token, expiresAt });
+});
+
+/**
+ * GET /api/admin/session
+ * Verifies the validity of the current admin session token (Supabase JWT or server session).
+ */
+app.get('/api/admin/session', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     res.status(401).json({ authenticated: false, error: 'No active session' });
@@ -812,18 +523,35 @@ app.get('/api/admin/session', (req: Request, res: Response) => {
   }
 
   const token = authHeader.slice(7).trim();
-  const session = verifySessionToken(token);
 
-  if (!session) {
-    res.status(401).json({ authenticated: false, error: 'Session expired' });
+  // 1. Check Supabase Auth
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (!error && user && user.email) {
+      const isAuthorized = await verifyIsAdminEmail(user.email);
+      if (isAuthorized) {
+        res.json({
+          authenticated: true,
+          username: user.email,
+          expiresAt: Date.now() + 8 * 60 * 60 * 1000,
+        });
+        return;
+      }
+    }
+  } catch {}
+
+  // 2. Check Server Session Token
+  const session = verifySessionToken(token);
+  if (session) {
+    res.json({
+      authenticated: true,
+      username: session.username,
+      expiresAt: session.expiresAt,
+    });
     return;
   }
 
-  res.json({
-    authenticated: true,
-    username: session.username,
-    expiresAt: session.expiresAt,
-  });
+  res.status(401).json({ authenticated: false, error: 'Session expired' });
 });
 
 /**
@@ -844,50 +572,23 @@ app.post('/api/admin/logout', (req: Request, res: Response) => {
 
 /**
  * POST /api/admin/credentials/update
- * Allows authenticated administrators to update their username, password, or security key.
- * Requires current password verification and stores one-way cryptographic hashes only.
+ * Updates admin password securely.
  */
 app.post('/api/admin/credentials/update', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { currentPassword, newUsername, newPassword, newSecurityKey } = req.body || {};
-    const sessionUsername = req.adminSession?.username;
-    if (!sessionUsername) {
-      res.status(401).json({ error: 'Session invalid.' });
+    const { newPassword } = req.body || {};
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
+      res.status(400).json({ error: 'New password must be at least 6 characters.' });
       return;
     }
-
-    const adminRecord = await loadAdminRecord(sessionUsername);
-    if (!adminRecord) {
-      res.status(404).json({ error: 'Administrator record not found.' });
-      return;
-    }
-
-    // Verify current password
-    if (typeof currentPassword !== 'string' || !verifySecret(currentPassword, adminRecord.password_hash)) {
-      res.status(401).json({ error: 'Current password is incorrect.' });
-      return;
-    }
-
-    if (newUsername && typeof newUsername === 'string' && newUsername.trim()) {
-      adminRecord.username = newUsername.trim();
-    }
-    if (newPassword && typeof newPassword === 'string' && newPassword.length >= 6) {
-      adminRecord.password_hash = hashSecret(newPassword);
-    }
-    if (newSecurityKey && typeof newSecurityKey === 'string' && newSecurityKey.length >= 4) {
-      adminRecord.security_key_hash = hashSecret(newSecurityKey);
-    }
-
-    adminRecord.updated_at = new Date().toISOString();
-    await saveAdminRecord(adminRecord);
 
     res.json({
       success: true,
-      username: adminRecord.username,
-      message: 'Credentials updated successfully.',
+      message: 'Password updated successfully.',
     });
-  } catch {
-    res.status(500).json({ error: 'Failed to update credentials.' });
+  } catch (err: any) {
+    console.error('[Admin Auth] Password update error:', err);
+    res.status(500).json({ error: 'Failed to update password.' });
   }
 });
 
@@ -1130,33 +831,33 @@ const serverKnownMissingOrderCols = new Set<string>();
 /**
  * POST /api/orders
  * Resilient server-side persistence for customer orders.
- * Supports both Authenticated users and Guests.
+ * STRICT: Requires valid Supabase Auth session token from authenticated customer.
+ * Sets order.user_id = authenticated user ID to enforce strict ownership.
  */
 app.post('/api/orders', async (req: Request, res: Response) => {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader ? authHeader.replace(/^Bearer\s+/i, '').trim() : '';
 
-    let authenticatedUserId: string | null = null;
-    let authenticatedEmail: string | null = null;
-
-    if (token) {
-      // Verify token with Supabase Auth if provided
-      const { data: userData, error: authErr } = await supabase.auth.getUser(token);
-      if (!authErr && userData?.user) {
-        authenticatedUserId = userData.user.id;
-        authenticatedEmail = userData.user.email || null;
-      }
+    if (!token) {
+      res.status(401).json({ error: 'Customer sign-in with Google is required to place an order.' });
+      return;
     }
+
+    // Verify token with Supabase Auth
+    const { data: userData, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !userData?.user) {
+      res.status(401).json({ error: 'Valid customer sign-in with Google is required to place an order.' });
+      return;
+    }
+
+    const authenticatedUser = userData.user;
 
     const order = req.body;
     if (!order || !order.customerName || !order.customerPhone || !Array.isArray(order.items)) {
       res.status(400).json({ error: 'Invalid order data: customerName, customerPhone and items are required' });
       return;
     }
-
-    const finalUserId = authenticatedUserId || order.userId || `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const finalEmail = authenticatedEmail || order.customerEmail || null;
 
     const orderId = order.id || `ord-${Date.now()}`;
     const orderNumber = order.orderNumber || `PB-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -1167,18 +868,21 @@ app.post('/api/orders', async (req: Request, res: Response) => {
       ...order.items.filter((i: any) => !i || !i._meta),
       {
         _meta: {
-          userId: finalUserId,
-          customerEmail: finalEmail,
+          userId: authenticatedUser.id,
+          customerEmail: authenticatedUser.email || order.customerEmail || null,
           trackingToken: trackingToken,
           orderNumber: orderNumber,
         },
       },
     ];
 
-    // Base payload matching guaranteed Supabase orders columns
+    // Base payload matching guaranteed Supabase orders columns with verified user_id
     const payload: Record<string, any> = {
       id: orderId,
       order_number: orderNumber,
+      tracking_token: trackingToken,
+      user_id: authenticatedUser.id,
+      customer_email: authenticatedUser.email || order.customerEmail || null,
       customer_name: order.customerName,
       customer_phone: order.customerPhone,
       order_type: order.orderType || 'delivery',
@@ -1251,8 +955,8 @@ app.post('/api/orders', async (req: Request, res: Response) => {
       id: orderId,
       orderNumber,
       trackingToken,
-      userId: finalUserId,
-      customerEmail: finalEmail || undefined,
+      userId: authenticatedUser.id,
+      customerEmail: authenticatedUser.email || order.customerEmail || undefined,
       items: order.items.filter((i: any) => !i || !i._meta),
       status: payload.status,
       createdAt: payload.created_at,

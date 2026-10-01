@@ -11,7 +11,7 @@ export const SUPABASE_ANON_KEY =
 
 export const isSupabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
-// Create client with auto-refresh and realtime capabilities
+// Create client with auto-refresh and realtime capabilities for customer storefront
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
@@ -23,6 +23,53 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     },
   },
 });
+
+// Dedicated Supabase client for Admin Authentication with isolated session storage.
+// This completely separates the customer Google account from the administrative session.
+export const adminSupabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    storageKey: 'pb_admin_auth_session',
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+});
+
+/**
+ * Authoritatively verifies whether a user is an authorized administrator.
+ * Checks public.admin_users table or verified store owner email.
+ */
+export async function verifyIsAdminUser(email?: string | null): Promise<boolean> {
+  if (!email) return false;
+  const cleanEmail = email.trim().toLowerCase();
+
+  // 1. Primary Store Owner Identity
+  if (cleanEmail === 'groverlakshit108@gmail.com') {
+    return true;
+  }
+
+  // 2. Query public.admin_users table
+  try {
+    const { data, error } = await supabase
+      .from('admin_users')
+      .select('email, role')
+      .ilike('email', cleanEmail)
+      .maybeSingle();
+
+    if (!error && data && data.email) {
+      return true;
+    }
+  } catch (err) {
+    console.warn('verifyIsAdminUser error checking admin_users:', err);
+  }
+
+  // 3. Built-in bistro admin email identity
+  if (cleanEmail === 'admin@punjabibistro.com') {
+    return true;
+  }
+
+  return false;
+}
 
 export interface ConnectionStatus {
   connected: boolean;

@@ -150,7 +150,29 @@ CREATE TABLE IF NOT EXISTS public.products (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 6. Dedicated Admin Keys Table (Secure Server & Database Authentication)
+-- 6. Dedicated Authorized Administrators Registry (Production Auth)
+CREATE TABLE IF NOT EXISTS public.admin_users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT UNIQUE NOT NULL,
+  role TEXT NOT NULL DEFAULT 'owner',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.admin_users ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow anon and authenticated to check admin status" ON public.admin_users;
+CREATE POLICY "Allow anon and authenticated to check admin status"
+  ON public.admin_users
+  FOR SELECT
+  TO anon, authenticated
+  USING (true);
+
+-- Seed verified primary owner
+INSERT INTO public.admin_users (email, role)
+VALUES ('groverlakshit108@gmail.com', 'owner')
+ON CONFLICT (email) DO NOTHING;
+
+-- 7. Legacy Admin Keys Table (Maintained for backward compatibility)
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 
 CREATE TABLE IF NOT EXISTS public.admin_keys (
