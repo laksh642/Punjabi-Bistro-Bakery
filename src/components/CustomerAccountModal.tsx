@@ -32,18 +32,20 @@ export const CustomerAccountModal: React.FC = () => {
   const [address, setAddress] = useState('');
   const [landmark, setLandmark] = useState('');
   const [deliveryInstructions, setDeliveryInstructions] = useState('');
-  const [pincode, setPincode] = useState('176219');
+  const [pincode, setPincode] = useState('142042');
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [pincodeError, setPincodeError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState(false);
 
   useEffect(() => {
     if (customerProfile) {
       setFullName(customerProfile.fullName || '');
-      setPhone(customerProfile.phone || '');
+      setPhone(customerProfile.phone ? customerProfile.phone.replace(/\D/g, '').slice(0, 10) : '');
       setAddress(customerProfile.address || '');
       setLandmark(customerProfile.landmark || '');
       setDeliveryInstructions(customerProfile.deliveryInstructions || '');
-      setPincode(customerProfile.pincode || '176219');
+      setPincode(customerProfile.pincode && customerProfile.pincode.trim() ? customerProfile.pincode.trim() : '142042');
     } else if (user) {
       setFullName(user.user_metadata?.full_name || user.user_metadata?.name || '');
     }
@@ -51,19 +53,54 @@ export const CustomerAccountModal: React.FC = () => {
 
   if (!isAccountModalOpen || !user) return null;
 
+  const handlePhoneChange = (val: string) => {
+    const cleanDigits = val.replace(/\D/g, '').slice(0, 10);
+    setPhone(cleanDigits);
+    if (cleanDigits.length > 0 && cleanDigits.length !== 10) {
+      setPhoneError(`Phone number must be exactly 10 digits (${cleanDigits.length}/10)`);
+    } else {
+      setPhoneError(null);
+    }
+  };
+
+  const handlePincodeChange = (val: string) => {
+    const cleanPin = val.trim();
+    setPincode(cleanPin);
+    if (cleanPin && cleanPin !== '142042') {
+      setPincodeError(`No delivery available for pincode ${cleanPin}. Delivery is only available for 142042 (Dharamkot).`);
+    } else {
+      setPincodeError(null);
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    setPhoneError(null);
+    setPincodeError(null);
+
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (cleanPhone.length !== 10) {
+      setPhoneError('Phone number must be exactly 10 digits.');
+      return;
+    }
+
+    const cleanPin = pincode.trim();
+    if (cleanPin && cleanPin !== '142042') {
+      setPincodeError(`No delivery available for pincode ${cleanPin}. Punjabi Bistro only delivers to 142042 (Dharamkot region).`);
+      return;
+    }
+
     setIsSaving(true);
     setSuccessMsg(false);
 
     try {
       await updateCustomerProfile({
         fullName: fullName.trim(),
-        phone: phone.trim(),
+        phone: cleanPhone,
         address: address.trim(),
         landmark: landmark.trim(),
         deliveryInstructions: deliveryInstructions.trim(),
-        pincode: pincode.trim(),
+        pincode: cleanPin || '142042',
       });
       setSuccessMsg(true);
       setTimeout(() => setSuccessMsg(false), 3000);
@@ -140,20 +177,35 @@ export const CustomerAccountModal: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">
-                  Contact Phone (for delivery driver updates)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-stone-700">
+                    Contact Phone (10 digits) *
+                  </label>
+                  <span className={`text-[10px] font-semibold ${phone.length === 10 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    {phone.length === 10 ? '✓ Valid (10 digits)' : `${phone.length}/10 digits`}
+                  </span>
+                </div>
                 <div className="relative">
                   <Phone className="w-4 h-4 text-stone-400 absolute left-3 top-2.5" />
                   <input
                     type="tel"
+                    maxLength={10}
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 text-xs border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
-                    placeholder="e.g. 9876543210"
+                    onChange={(e) => handlePhoneChange(e.target.value)}
+                    className={`w-full pl-9 pr-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-2 ${
+                      phoneError
+                        ? 'border-amber-400 focus:ring-amber-500 bg-amber-50/30'
+                        : 'border-stone-300 focus:ring-emerald-600'
+                    }`}
+                    placeholder="e.g. 9876543210 (10 digits)"
                     required
                   />
                 </div>
+                {phoneError && (
+                  <p className="mt-1 text-[11px] text-amber-700 font-medium flex items-center gap-1">
+                    <span>⚠️ {phoneError}</span>
+                  </p>
+                )}
               </div>
 
               <div>
@@ -173,9 +225,14 @@ export const CustomerAccountModal: React.FC = () => {
             </div>
 
             <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-2xs space-y-3">
-              <h3 className="text-xs font-bold text-stone-500 uppercase tracking-wider">
-                Default Dharamkot Delivery Address
-              </h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold text-stone-500 uppercase tracking-wider">
+                  Default Dharamkot Delivery Address
+                </h3>
+                <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                  Delivery Region: 142042
+                </span>
+              </div>
 
               <div>
                 <label className="block text-xs font-semibold text-stone-700 mb-1">
@@ -203,22 +260,47 @@ export const CustomerAccountModal: React.FC = () => {
                     value={landmark}
                     onChange={(e) => setLandmark(e.target.value)}
                     className="w-full px-3 py-2 text-xs border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
-                    placeholder="e.g. Near German Bakery"
+                    placeholder="e.g. Near Udham Singh Chowk"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-stone-700 mb-1">
-                    Pincode
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-stone-700">
+                      Pincode *
+                    </label>
+                    <span className="text-[10px] text-emerald-700 font-semibold">Hub: 142042</span>
+                  </div>
                   <input
                     type="text"
+                    maxLength={6}
                     value={pincode}
-                    onChange={(e) => setPincode(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
-                    placeholder="176219"
+                    onChange={(e) => handlePincodeChange(e.target.value)}
+                    className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-2 ${
+                      pincode && pincode.trim() !== '142042'
+                        ? 'border-rose-400 focus:ring-rose-500 bg-rose-50/40 text-rose-950 font-bold'
+                        : 'border-stone-300 focus:ring-emerald-600'
+                    }`}
+                    placeholder="142042"
+                    required
                   />
                 </div>
               </div>
+
+              {/* Pincode delivery availability banner */}
+              {pincode && pincode.trim() !== '142042' ? (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-start gap-2">
+                  <X className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="block font-bold">No delivery available</strong>
+                    <span>Delivery is not available for pincode {pincode}. Punjabi Bistro currently only delivers to the <strong>142042</strong> region (Dharamkot).</span>
+                  </div>
+                </div>
+              ) : pincode.trim() === '142042' ? (
+                <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-xl text-[11px] text-emerald-800 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Delivery available for Dharamkot region (142042)</span>
+                </div>
+              ) : null}
 
               <div>
                 <label className="block text-xs font-semibold text-stone-700 mb-1">

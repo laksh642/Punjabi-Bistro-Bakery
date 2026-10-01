@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Clock,
   CheckCircle2,
@@ -31,6 +31,11 @@ import {
   Shield,
   Tag,
   KeyRound,
+  Bell,
+  XCircle,
+  ShieldCheck,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { useAdminAuth } from '../context/AdminAuthContext';
@@ -59,6 +64,7 @@ export const AdminDashboard: React.FC = () => {
     businessSettings,
     updateBusinessSettings,
     issues,
+    loadIssuesFromCloud,
     resolveIssue,
     feedbacks,
     setIsAdminView,
@@ -68,27 +74,194 @@ export const AdminDashboard: React.FC = () => {
   } = useStore();
   const { updatePassword } = useAdminAuth();
 
-  // Load cloud orders on Admin Dashboard mount and listen to changes
+  // Alert sound and banner notification state
+  const [newOrderAlert, setNewOrderAlert] = useState<{
+    id: string;
+    orderNumber: string;
+    customerName: string;
+    customerPhone: string;
+    total: number;
+    itemsSummary: string;
+    fulfillment: string;
+    isContactless?: boolean;
+  } | null>(null);
+
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [isRefreshingIssues, setIsRefreshingIssues] = useState(false);
+  const knownOrderIdsRef = useRef<Set<string>>(new Set());
+  const isInitialMountRef = useRef<boolean>(true);
+
+  // Synthesize crystal bell/ting chime using Web Audio API
+  const playTingSound = useCallback(() => {
+    if (!soundEnabled) return;
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+      const now = ctx.currentTime;
+
+      // Primary crystal chime (A5 note -> ting)
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(880, now);
+      osc1.frequency.exponentialRampToValueAtTime(1760, now + 0.12);
+      gain1.gain.setValueAtTime(0.6, now);
+      gain1.gain.exponentialRampToValueAtTime(0.0001, now + 1.2);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 1.2);
+
+      // Shimmering second harmonic
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(1320, now + 0.05);
+      gain2.gain.setValueAtTime(0.35, now + 0.05);
+      gain2.gain.exponentialRampToValueAtTime(0.0001, now + 1.5);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.05);
+      osc2.stop(now + 1.5);
+    } catch (e) {
+      console.warn('Audio alert error:', e);
+    }
+  }, [soundEnabled]);
+
+  // Load cloud orders and complaints on Admin Dashboard mount, with active polling and live events
   useEffect(() => {
     loadAdminOrders();
+    loadIssuesFromCloud();
+
+    // 1. Cross-window / custom event listener for immediate notifications
+    const handleNewOrderEvent = (e: Event) => {
+      const custom = e as CustomEvent;
+      if (custom.detail) {
+        const o = custom.detail;
+        if (!knownOrderIdsRef.current.has(o.id)) {
+          knownOrderIdsRef.current.add(o.id);
+          playTingSound();
+          const itemsText = o.items && o.items.length > 0
+            ? o.items.map((i: any) => `${i.quantity || 1}x ${i.product?.name || i.name || (i as any).productName || 'Item'}`).join(', ')
+            : 'Fresh Bakery Order';
+          setNewOrderAlert({
+            id: o.id,
+            orderNumber: o.orderNumber,
+            customerName: o.customerName,
+            customerPhone: o.customerPhone,
+            total: o.total,
+            itemsSummary: itemsText,
+            fulfillment: o.orderType,
+            isContactless: Boolean(o.isNoContactDelivery || o.contactlessDelivery),
+          });
+          loadAdminOrders();
+        }
+      }
+    };
+
+    const handleIssueUpdateEvent = () => {
+      loadIssuesFromCloud();
+    };
+
+    window.addEventListener('pb_new_order_placed', handleNewOrderEvent);
+    window.addEventListener('pb_issues_updated', handleIssueUpdateEvent);
+
+    // 2. Active 5-second polling to ensure live updates across all sessions
+    const pollInterval = setInterval(() => {
+      loadAdminOrders();
+      loadIssuesFromCloud();
+    }, 5000);
+
+    let orderChannel: any = null;
+    let issueChannel: any = null;
 
     if (isSupabaseConfigured) {
-      const channel = supabase
+      // 3. Live Supabase orders channel
+      orderChannel = supabase
         .channel('pb-admin-live-orders')
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'orders' },
-          () => {
+          (payload: any) => {
             loadAdminOrders();
+            if (payload.eventType === 'INSERT' && payload.new) {
+              const newRow = payload.new;
+              if (!knownOrderIdsRef.current.has(newRow.id)) {
+                knownOrderIdsRef.current.add(newRow.id);
+                playTingSound();
+                setNewOrderAlert({
+                  id: newRow.id,
+                  orderNumber: newRow.order_number || 'New',
+                  customerName: newRow.customer_name || 'Customer',
+                  customerPhone: newRow.customer_phone || '',
+                  total: Number(newRow.total || 0),
+                  itemsSummary: Array.isArray(newRow.items)
+                    ? newRow.items.map((i: any) => `${i.quantity || 1}x ${i.product?.name || i.name || 'Item'}`).join(', ')
+                    : 'Fresh Bakery Order',
+                  fulfillment: newRow.order_type || 'delivery',
+                  isContactless: Boolean(newRow.is_no_contact_delivery),
+                });
+              }
+            }
           }
         )
         .subscribe();
 
-      return () => {
-        supabase.removeChannel(channel);
-      };
+      // 4. Live Supabase customer issues / complaints channel
+      issueChannel = supabase
+        .channel('pb-admin-live-issues')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'customer_issues' },
+          () => {
+            loadIssuesFromCloud();
+          }
+        )
+        .subscribe();
     }
-  }, []);
+
+    return () => {
+      clearInterval(pollInterval);
+      window.removeEventListener('pb_new_order_placed', handleNewOrderEvent);
+      window.removeEventListener('pb_issues_updated', handleIssueUpdateEvent);
+      if (orderChannel) supabase.removeChannel(orderChannel);
+      if (issueChannel) supabase.removeChannel(issueChannel);
+    };
+  }, [loadAdminOrders, loadIssuesFromCloud, playTingSound]);
+
+  // Track order updates and trigger notification when a new order appears
+  useEffect(() => {
+    if (isInitialMountRef.current) {
+      orders.forEach((o) => knownOrderIdsRef.current.add(o.id));
+      isInitialMountRef.current = false;
+      return;
+    }
+
+    const newArrival = orders.find((o) => !knownOrderIdsRef.current.has(o.id));
+    if (newArrival) {
+      knownOrderIdsRef.current.add(newArrival.id);
+      playTingSound();
+      const itemsText = newArrival.items && newArrival.items.length > 0
+        ? newArrival.items.map((i) => `${i.quantity}x ${i.product?.name || (i as any).name || 'Item'}`).join(', ')
+        : 'Fresh Bistro Items';
+      setNewOrderAlert({
+        id: newArrival.id,
+        orderNumber: newArrival.orderNumber,
+        customerName: newArrival.customerName,
+        customerPhone: newArrival.customerPhone,
+        total: newArrival.total,
+        itemsSummary: itemsText,
+        fulfillment: newArrival.orderType,
+        isContactless: Boolean(newArrival.isNoContactDelivery || (newArrival as any).contactlessDelivery),
+      });
+    }
+
+    orders.forEach((o) => knownOrderIdsRef.current.add(o.id));
+  }, [orders, playTingSound]);
 
   const [activeTab, setActiveTab] = useState<
     'orders' | 'menu' | 'cakes' | 'coupons' | 'zones' | 'issues' | 'settings' | 'analytics'
@@ -298,6 +471,19 @@ export const AdminDashboard: React.FC = () => {
                 />
               </div>
 
+              {/* Sound Ting Test / Toggle Button */}
+              <button
+                onClick={() => {
+                  setSoundEnabled(true);
+                  playTingSound();
+                }}
+                title="Test bakery order ting chime sound"
+                className="flex items-center gap-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/60 text-amber-200 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-xs active:scale-95"
+              >
+                <Volume2 className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                <span className="hidden sm:inline text-[11px]">Test Ting Sound 🔔</span>
+              </button>
+
               {/* Quick Sync Button */}
               <button
                 onClick={() => syncWithCloud()}
@@ -441,6 +627,73 @@ export const AdminDashboard: React.FC = () => {
       {/* Main Content Area */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
+        {/* Real-time Order Arrival Banner with Ting Notification */}
+        {newOrderAlert && (
+          <div className="mb-6 rounded-2xl bg-gradient-to-r from-amber-500 via-emerald-600 to-[#0B2E15] p-1 shadow-2xl animate-in slide-in-from-top-4 duration-300">
+            <div className="bg-white rounded-xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-amber-100 border border-amber-300 flex items-center justify-center text-amber-700 shrink-0 shadow-xs animate-bounce">
+                  <Bell className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="bg-amber-100 text-amber-900 border border-amber-300 text-xs font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                      🔔 New Order Received!
+                    </span>
+                    <span className="font-mono font-bold text-sm text-emerald-950">
+                      #{newOrderAlert.orderNumber}
+                    </span>
+                    <span className="text-xs bg-emerald-100 text-emerald-900 font-bold px-2 py-0.5 rounded-md uppercase">
+                      {newOrderAlert.fulfillment}
+                    </span>
+                    {newOrderAlert.isContactless && (
+                      <span className="text-xs bg-indigo-100 text-indigo-950 border border-indigo-200 font-bold px-2.5 py-0.5 rounded-md flex items-center gap-1">
+                        <ShieldCheck className="w-3.5 h-3.5 text-indigo-700" />
+                        ⚡ Contactless Delivery
+                      </span>
+                    )}
+                  </div>
+                  <p className="font-serif font-black text-base sm:text-lg text-emerald-950 mt-1">
+                    New Order of: {newOrderAlert.itemsSummary}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-stone-600 mt-1">
+                    <span>Customer: <strong>{newOrderAlert.customerName}</strong> ({newOrderAlert.customerPhone})</span>
+                    <span>•</span>
+                    <span>Total Amount: <strong className="text-emerald-800 text-sm">₹{newOrderAlert.total}</strong></span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-end md:self-center shrink-0">
+                <button
+                  onClick={() => playTingSound()}
+                  className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Re-play Ting Sound"
+                >
+                  <Volume2 className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Re-play Ting 🔔</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveTab('orders');
+                    setNewOrderAlert(null);
+                  }}
+                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
+                >
+                  View in Board
+                </button>
+                <button
+                  onClick={() => setNewOrderAlert(null)}
+                  className="p-2 text-stone-400 hover:text-stone-700 rounded-xl hover:bg-stone-100 transition-colors cursor-pointer"
+                  title="Dismiss notification"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* TAB 1: KANBAN LIVE ORDERS BOARD */}
         {activeTab === 'orders' && (
           <div className="space-y-6">
@@ -459,8 +712,8 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Kanban Columns */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Kanban Columns - Responsive 5 Columns */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
               
               {/* Column 1: New / Confirmed */}
               <div className="bg-white rounded-2xl border border-emerald-100 p-4 flex flex-col shadow-2xs">
@@ -573,6 +826,40 @@ export const AdminDashboard: React.FC = () => {
                       businessSettings={businessSettings}
                     />
                   ))}
+                </div>
+              </div>
+
+              {/* Column 5: Cancelled Orders */}
+              <div className="bg-white rounded-2xl border border-rose-200 p-4 flex flex-col shadow-2xs">
+                <div className="flex items-center justify-between pb-3 mb-3 border-b border-rose-100">
+                  <span className="font-bold text-xs uppercase tracking-wider text-rose-800 flex items-center gap-1.5">
+                    <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                    Cancelled Orders
+                  </span>
+                  <span className="bg-rose-100 text-rose-900 text-xs font-bold px-2 py-0.5 rounded-full">
+                    {orders.filter((o) => o.status === 'cancelled').length}
+                  </span>
+                </div>
+
+                <div className="space-y-3 overflow-y-auto max-h-[70vh]">
+                  {orders.filter((o) => o.status === 'cancelled').length === 0 ? (
+                    <div className="py-8 text-center text-xs text-stone-400">
+                      No cancelled orders.
+                    </div>
+                  ) : (
+                    orders
+                      .filter((o) => o.status === 'cancelled')
+                      .map((order) => (
+                        <OrderCard
+                          key={order.id}
+                          order={order}
+                          onUpdateStatus={(s) => updateOrderStatus(order.id, s)}
+                          onDelay={() => setDelayModalOrder(order)}
+                          onPrint={() => setPrintOrder(order)}
+                          businessSettings={businessSettings}
+                        />
+                      ))
+                  )}
                 </div>
               </div>
 
@@ -944,19 +1231,56 @@ export const AdminDashboard: React.FC = () => {
         {/* TAB 5: CUSTOMER ISSUE RESOLUTION CENTER */}
         {activeTab === 'issues' && (
           <div className="space-y-6">
-            <div>
-              <h2 className="font-serif text-2xl font-bold text-emerald-950">
-                Customer Support & Complaint Desk
-              </h2>
-              <p className="text-xs text-stone-600">
-                Track and resolve reported delivery delays, missing items, or cake issues directly.
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="font-serif text-2xl font-bold text-emerald-950">
+                  Customer Support & Complaint Desk
+                </h2>
+                <p className="text-xs text-stone-600">
+                  Live reports submitted by customers through the storefront report desk. Track and resolve issues directly.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={async () => {
+                    setIsRefreshingIssues(true);
+                    await loadIssuesFromCloud();
+                    setTimeout(() => setIsRefreshingIssues(false), 500);
+                  }}
+                  disabled={isRefreshingIssues}
+                  className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-emerald-200 ${isRefreshingIssues ? 'animate-spin' : ''}`} />
+                  <span>{isRefreshingIssues ? 'Checking...' : 'Refresh Complaints'}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="bg-white p-4 rounded-2xl border border-emerald-100 shadow-2xs">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500 block">Total Tickets</span>
+                <span className="text-2xl font-black text-emerald-950 mt-1 block">{issues.length}</span>
+              </div>
+              <div className="bg-white p-4 rounded-2xl border border-rose-100 shadow-2xs">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-rose-700 block">Open Complaints</span>
+                <span className="text-2xl font-black text-rose-700 mt-1 block">
+                  {issues.filter((i) => i.status === 'open').length}
+                </span>
+              </div>
+              <div className="bg-white p-4 rounded-2xl border border-emerald-100 shadow-2xs col-span-2 sm:col-span-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 block">Resolved</span>
+                <span className="text-2xl font-black text-emerald-800 mt-1 block">
+                  {issues.filter((i) => i.status === 'resolved').length}
+                </span>
+              </div>
             </div>
 
             <div className="bg-white rounded-3xl border border-emerald-100 p-6 space-y-4 shadow-xs">
               {issues.length === 0 ? (
-                <div className="py-8 text-center text-xs text-stone-500">
-                  No active customer tickets reported.
+                <div className="py-8 text-center text-xs text-stone-500 space-y-2">
+                  <p>No customer complaints or issues reported yet.</p>
+                  <p className="text-[11px] text-stone-400">When customers submit issues via the footer or orders help modal, they will appear here live.</p>
                 </div>
               ) : (
                 <div className="space-y-3 divide-y divide-emerald-100">
@@ -1773,6 +2097,14 @@ const OrderCard: React.FC<OrderCardProps> = ({
         </div>
       </div>
 
+      {/* Contactless Delivery Notification */}
+      {(order.isNoContactDelivery || (order as any).contactlessDelivery) && (
+        <div className="p-2 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-950 text-[11px] font-bold flex items-center gap-1.5 shadow-2xs">
+          <ShieldCheck className="w-4 h-4 text-indigo-600 shrink-0" />
+          <span>⚡ Contactless Delivery Selected (Drop at Doorstep & Call Customer)</span>
+        </div>
+      )}
+
       {/* Delay alert banner on card */}
       {order.delayMinutes && order.delayMinutes > 0 && (
         <div className="p-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[10px] font-semibold flex items-center gap-1">
@@ -1796,6 +2128,35 @@ const OrderCard: React.FC<OrderCardProps> = ({
       {order.deliveryAddress && (
         <div className="text-[10px] text-stone-500 line-clamp-1">
           📍 {order.deliveryAddress}
+        </div>
+      )}
+
+      {/* Quick Action For Cancelled Orders: Allows Admin to reinstate or move to kitchen */}
+      {order.status === 'cancelled' && (
+        <div className="pt-2 border-t border-rose-200 bg-rose-50/70 p-2.5 rounded-xl flex flex-col gap-1.5">
+          <div className="flex items-center justify-between text-[11px] font-bold text-rose-800">
+            <span className="flex items-center gap-1">
+              <XCircle className="w-3.5 h-3.5 text-rose-600" />
+              Cancelled Order
+            </span>
+            <span className="text-[10px] text-stone-600">Reactivate:</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => onUpdateStatus('confirmed')}
+              className="flex-1 py-1.5 px-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[10px] font-bold transition-all shadow-2xs cursor-pointer text-center"
+              title="Re-confirm order and send to active queue"
+            >
+              ✓ Re-Confirm
+            </button>
+            <button
+              onClick={() => onUpdateStatus('preparing')}
+              className="flex-1 py-1.5 px-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold transition-all shadow-2xs cursor-pointer text-center"
+              title="Move order directly into kitchen preparation"
+            >
+              🍳 In Kitchen
+            </button>
+          </div>
         </div>
       )}
 

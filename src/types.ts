@@ -124,6 +124,7 @@ export interface Order {
   status: OrderStatus;
   orderNotes?: string;
   isNoContactDelivery?: boolean;
+  contactlessDelivery?: boolean;
   createdAt: string;
   estimatedDeliveryTime?: string;
   delayMinutes?: number;

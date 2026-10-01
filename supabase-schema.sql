@@ -167,11 +167,6 @@ CREATE POLICY "Allow anon and authenticated to check admin status"
   TO anon, authenticated
   USING (true);
 
--- Seed verified primary owner
-INSERT INTO public.admin_users (email, role)
-VALUES ('groverlakshit108@gmail.com', 'owner')
-ON CONFLICT (email) DO NOTHING;
-
 -- 7. Legacy Admin Keys Table (Maintained for backward compatibility)
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 

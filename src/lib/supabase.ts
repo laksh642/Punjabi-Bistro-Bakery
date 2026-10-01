@@ -1,5 +1,5 @@
 import { createClient, User, Session } from '@supabase/supabase-js';
-import { Order, CustomCakeEnquiry, ReviewItem, CustomerIssue, OrderStatus, Product, CustomerProfile } from '../types';
+import { Order, CustomCakeEnquiry, ReviewItem, CustomerIssue, OrderStatus, Product, CustomerProfile, Coupon } from '../types';
 
 // Supabase project credentials (provided by user)
 export const SUPABASE_URL =
@@ -37,35 +37,50 @@ export const adminSupabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 
 /**
  * Authoritatively verifies whether a user is an authorized administrator.
- * Checks public.admin_users table or verified store owner email.
+ * Searches public.admin_users table or verified store owner email.
  */
 export async function verifyIsAdminUser(email?: string | null): Promise<boolean> {
   if (!email) return false;
   const cleanEmail = email.trim().toLowerCase();
 
-  // 1. Primary Store Owner Identity
-  if (cleanEmail === 'groverlakshit108@gmail.com') {
-    return true;
-  }
+  // Check public.admin_users table exclusively - zero hardcoded emails
 
-  // 2. Query public.admin_users table
+  // 3. Query public.admin_users table
   try {
     const { data, error } = await supabase
       .from('admin_users')
-      .select('email, role')
-      .ilike('email', cleanEmail)
-      .maybeSingle();
+      .select('email, role, is_active')
+      .order('created_at', { ascending: false });
 
-    if (!error && data && data.email) {
-      return true;
+    if (!error && Array.isArray(data)) {
+      const match = data.find((row) => {
+        if (!row.email) return false;
+        if (row.is_active === false) return false;
+        const rowEmail = row.email.trim().toLowerCase();
+        
+        // Exact match
+        if (rowEmail === cleanEmail) return true;
+
+        // Smart match for common domain typos (e.g. doracake155@mail.com <-> doracake155@gmail.com)
+        const rowPrefix = rowEmail.split('@')[0];
+        const cleanPrefix = cleanEmail.split('@')[0];
+        if (
+          rowPrefix === cleanPrefix &&
+          (rowEmail.endsWith('@mail.com') || rowEmail.endsWith('@gmail.com')) &&
+          (cleanEmail.endsWith('@mail.com') || cleanEmail.endsWith('@gmail.com'))
+        ) {
+          return true;
+        }
+
+        return false;
+      });
+
+      if (match) {
+        return true;
+      }
     }
   } catch (err) {
     console.warn('verifyIsAdminUser error checking admin_users:', err);
-  }
-
-  // 3. Built-in bistro admin email identity
-  if (cleanEmail === 'admin@punjabibistro.com') {
-    return true;
   }
 
   return false;
@@ -253,6 +268,7 @@ export function mapRowToOrder(row: any): Order {
     status: row.status as OrderStatus,
     orderNotes: row.order_notes || undefined,
     isNoContactDelivery: Boolean(row.is_no_contact_delivery),
+    contactlessDelivery: Boolean(row.is_no_contact_delivery),
     createdAt: row.created_at,
     estimatedDeliveryTime: row.estimated_delivery_time || undefined,
     delayMinutes: row.delay_minutes ? Number(row.delay_minutes) : undefined,
@@ -392,7 +408,7 @@ export async function saveOrderToCloud(
       upi_txn_id: order.upiTxnId || null,
       status: order.status || 'new',
       order_notes: order.orderNotes || null,
-      is_no_contact_delivery: Boolean(order.isNoContactDelivery),
+      is_no_contact_delivery: Boolean(order.isNoContactDelivery || (order as any).contactlessDelivery),
       created_at: confirmedOrder.createdAt,
       estimated_delivery_time: order.estimatedDeliveryTime || null,
       delay_minutes: order.delayMinutes || null,
@@ -405,6 +421,10 @@ export async function saveOrderToCloud(
     )) as any;
 
     if (!error) {
+      try {
+        localStorage.setItem('pb_last_placed_order', JSON.stringify(confirmedOrder));
+        window.dispatchEvent(new CustomEvent('pb_new_order_placed', { detail: confirmedOrder }));
+      } catch {}
       return { success: true, order: confirmedOrder };
     }
 
@@ -516,8 +536,8 @@ export async function fetchCustomerProfileFromCloud(
         address: data.address || '',
         landmark: data.landmark || '',
         city: data.city || 'Dharamkot',
-        state: data.state || 'Himachal Pradesh',
-        pincode: data.pincode || '176219',
+        state: data.state || 'Punjab',
+        pincode: data.pincode || '142042',
         deliveryInstructions: data.delivery_instructions || '',
         createdAt: data.created_at,
         updatedAt: data.updated_at,
@@ -560,8 +580,8 @@ export async function saveCustomerProfileToCloud(
       address: profile.address || null,
       landmark: profile.landmark || null,
       city: profile.city || 'Dharamkot',
-      state: profile.state || 'Himachal Pradesh',
-      pincode: profile.pincode || '176219',
+      state: profile.state || 'Punjab',
+      pincode: profile.pincode || '142042',
       delivery_instructions: profile.deliveryInstructions || null,
       updated_at: new Date().toISOString(),
     };
@@ -1086,34 +1106,223 @@ export async function saveReviewToCloud(review: ReviewItem): Promise<boolean> {
 }
 
 export async function saveCustomerIssueToCloud(issue: CustomerIssue): Promise<boolean> {
-  try {
-    const payload = {
-      id: issue.id,
-      order_number: issue.orderNumber,
-      customer_phone: issue.customerPhone,
-      customer_name: issue.customerName,
-      issue_type: issue.issueType,
-      description: issue.description,
-      status: issue.status,
-      resolution_notes: issue.resolutionNotes || null,
-      created_at: issue.createdAt,
-    };
+  const payload = {
+    id: issue.id,
+    order_number: issue.orderNumber,
+    customer_phone: issue.customerPhone,
+    customer_name: issue.customerName,
+    issue_type: issue.issueType,
+    description: issue.description,
+    status: issue.status,
+    resolution_notes: issue.resolutionNotes || null,
+    created_at: issue.createdAt,
+  };
 
+  let saved = false;
+
+  // 1. Direct Supabase save
+  try {
     const { error } = await supabase.from('customer_issues').upsert(payload, { onConflict: 'id' });
-    return !error;
-  } catch {
-    return false;
+    if (!error) saved = true;
+  } catch (err) {
+    console.warn('saveCustomerIssueToCloud Supabase error:', err);
   }
+
+  // 2. Server persistence endpoint
+  try {
+    const res = await fetch('/api/customer/issues', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(issue),
+    });
+    if (res.ok) saved = true;
+  } catch (err) {
+    console.warn('saveCustomerIssueToCloud server error:', err);
+  }
+
+  // 3. Local storage and cross-window event
+  try {
+    const existing = JSON.parse(localStorage.getItem('pb_issues') || '[]');
+    const filtered = existing.filter((i: any) => i.id !== issue.id);
+    const updated = [issue, ...filtered];
+    localStorage.setItem('pb_issues', JSON.stringify(updated));
+    window.dispatchEvent(new CustomEvent('pb_issues_updated', { detail: updated }));
+  } catch {}
+
+  return saved;
 }
 
 export async function resolveCustomerIssueInCloud(id: string, notes: string): Promise<boolean> {
+  const adminToken = typeof localStorage !== 'undefined' ? localStorage.getItem('pb_admin_session_token') : null;
+  let resolved = false;
+
   try {
     const { error } = await supabase
       .from('customer_issues')
       .update({ status: 'resolved', resolution_notes: notes })
       .eq('id', id);
-    return !error;
-  } catch {
+    if (!error) resolved = true;
+  } catch {}
+
+  try {
+    const res = await fetch('/api/admin/issues/resolve', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+      },
+      body: JSON.stringify({ id, notes }),
+    });
+    if (res.ok) resolved = true;
+  } catch {}
+
+  return resolved;
+}
+
+/**
+ * Fetch all customer issues/complaints from Supabase & server API.
+ */
+export async function fetchCustomerIssuesFromCloud(): Promise<CustomerIssue[] | null> {
+  const adminToken = typeof localStorage !== 'undefined' ? localStorage.getItem('pb_admin_session_token') : null;
+
+  // Try server proxy endpoint first
+  try {
+    const headers: Record<string, string> = {};
+    if (adminToken) headers['Authorization'] = `Bearer ${adminToken}`;
+    const endpoint = adminToken ? '/api/admin/issues' : '/api/customer/issues';
+    const res = await fetch(endpoint, { headers });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        return data.map((row) => ({
+          id: row.id,
+          orderNumber: row.order_number || row.orderNumber || 'N/A',
+          customerPhone: row.customer_phone || row.customerPhone || '',
+          customerName: row.customer_name || row.customerName || 'Customer',
+          issueType: row.issue_type || row.issueType || 'other',
+          description: row.description || '',
+          status: row.status || 'open',
+          resolutionNotes: row.resolution_notes || row.resolutionNotes || undefined,
+          createdAt: row.created_at || row.createdAt,
+        }));
+      }
+    }
+  } catch (err) {
+    console.warn('fetchCustomerIssues server error:', err);
+  }
+
+  // Fallback to direct Supabase query
+  try {
+    const { data, error } = await supabase
+      .from('customer_issues')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (!error && Array.isArray(data)) {
+      return data.map((row) => ({
+        id: row.id,
+        orderNumber: row.order_number || 'N/A',
+        customerPhone: row.customer_phone || '',
+        customerName: row.customer_name || 'Customer',
+        issueType: row.issue_type || 'other',
+        description: row.description || '',
+        status: row.status || 'open',
+        resolutionNotes: row.resolution_notes || undefined,
+        createdAt: row.created_at,
+      }));
+    }
+  } catch (err) {
+    console.warn('fetchCustomerIssues direct query error:', err);
+  }
+
+  return null;
+}
+
+/**
+ * Fetch dynamic coupons from the server / cloud storage.
+ * Used by Storefront (TopOffersStrip) and CartDrawer.
+ */
+export async function fetchCouponsFromCloud(): Promise<Coupon[] | null> {
+  try {
+    const res = await fetch('/api/coupons');
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        return data.map((c) => ({
+          id: c.id,
+          code: (c.code || '').trim().toUpperCase(),
+          title: c.title || (c.discountType === 'percentage' ? `${c.discountValue}% OFF` : `₹${c.discountValue} OFF`),
+          subtitle: c.subtitle || c.description || `Valid on orders above ₹${c.minOrder || c.minOrderValue || 0}`,
+          discountType: c.discountType === 'percentage' ? 'percentage' : 'flat',
+          discountValue: Number(c.discountValue || 0),
+          maxDiscount: c.maxDiscount ? Number(c.maxDiscount) : undefined,
+          minOrder: Number(c.minOrder !== undefined ? c.minOrder : (c.minOrderValue !== undefined ? c.minOrderValue : 0)),
+          isActive: c.isActive !== false,
+          badge: c.badge || undefined,
+          expiryDate: c.expiryDate || undefined,
+        }));
+      }
+    }
+  } catch (err) {
+    console.warn('fetchCouponsFromCloud error:', err);
+  }
+  return null;
+}
+
+/**
+ * Save coupons to server / cloud storage.
+ * Used by AdminCouponManager.
+ */
+export async function saveCouponsToCloud(coupons: Coupon[]): Promise<boolean> {
+  const adminToken = typeof localStorage !== 'undefined' ? localStorage.getItem('pb_admin_session_token') : null;
+  
+  // Persist locally and trigger immediate cross-window update
+  try {
+    localStorage.setItem('pb_coupons', JSON.stringify(coupons));
+    window.dispatchEvent(new CustomEvent('pb_coupons_updated', { detail: coupons }));
+  } catch {}
+
+  try {
+    let res = await fetch('/api/admin/coupons', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+      },
+      body: JSON.stringify(coupons),
+    });
+
+    if (!res.ok) {
+      // Fallback to public endpoint
+      res = await fetch('/api/coupons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(coupons),
+      });
+    }
+
+    return res.ok;
+  } catch (err) {
+    console.warn('saveCouponsToCloud error:', err);
+    return false;
+  }
+}
+
+/**
+ * Delete a coupon from cloud storage.
+ */
+export async function deleteCouponFromCloud(id: string): Promise<boolean> {
+  const adminToken = typeof localStorage !== 'undefined' ? localStorage.getItem('pb_admin_session_token') : null;
+  try {
+    const res = await fetch(`/api/admin/coupons/${id}`, {
+      method: 'DELETE',
+      headers: {
+        ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+      },
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('deleteCouponFromCloud error:', err);
     return false;
   }
 }

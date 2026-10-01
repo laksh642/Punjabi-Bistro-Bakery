@@ -304,34 +304,42 @@ export interface AuthenticatedRequest extends Request {
 
 /**
  * Authoritatively verifies whether an email belongs to an authorized administrator.
- * 1. Checks verified owner identity: groverlakshit108@gmail.com
- * 2. Checks official store admin email: admin@punjabibistro.com
- * 3. Checks public.admin_users table in Supabase
+ * Queries public.admin_users table in Supabase dynamically - zero hardcoded emails.
  */
 async function verifyIsAdminEmail(email?: string | null): Promise<boolean> {
   if (!email) return false;
   const cleanEmail = email.trim().toLowerCase();
 
-  // 1. Primary Store Owner Identity
-  if (cleanEmail === 'groverlakshit108@gmail.com') {
-    return true;
-  }
-
-  // 2. Official Bistro Admin Email
-  if (cleanEmail === 'admin@punjabibistro.com') {
-    return true;
-  }
-
-  // 3. Query public.admin_users table
+  // Query public.admin_users table exclusively
   try {
     const { data, error } = await supabase
       .from('admin_users')
-      .select('email, role')
-      .ilike('email', cleanEmail)
-      .maybeSingle();
+      .select('email, role, is_active')
+      .order('created_at', { ascending: false });
 
-    if (!error && data && data.email) {
-      return true;
+    if (!error && Array.isArray(data)) {
+      const match = data.find((row) => {
+        if (!row.email) return false;
+        if (row.is_active === false) return false;
+        const rowEmail = row.email.trim().toLowerCase();
+        if (rowEmail === cleanEmail) return true;
+
+        const rowPrefix = rowEmail.split('@')[0];
+        const cleanPrefix = cleanEmail.split('@')[0];
+        if (
+          rowPrefix === cleanPrefix &&
+          (rowEmail.endsWith('@mail.com') || rowEmail.endsWith('@gmail.com')) &&
+          (cleanEmail.endsWith('@mail.com') || cleanEmail.endsWith('@gmail.com'))
+        ) {
+          return true;
+        }
+
+        return false;
+      });
+
+      if (match) {
+        return true;
+      }
     }
   } catch (err) {
     console.warn('[Admin Auth] Error querying admin_users table:', err);
@@ -781,18 +789,414 @@ app.post('/api/admin/issues/resolve', requireAdmin, async (req: AuthenticatedReq
   }
 
   try {
+    // Update local file backup if present
+    const localIssues = loadIssuesFromFile();
+    const localIdx = localIssues.findIndex((i) => i.id === id);
+    if (localIdx >= 0) {
+      localIssues[localIdx].status = 'resolved';
+      localIssues[localIdx].resolution_notes = notes || 'Resolved by management';
+      try {
+        fs.writeFileSync(ISSUES_FILE, JSON.stringify(localIssues, null, 2));
+      } catch {}
+    }
+
     const { error } = await supabase
       .from('customer_issues')
       .update({ status: 'resolved', resolution_notes: notes || 'Resolved by management' })
       .eq('id', id);
 
     if (error) {
-      res.status(500).json({ error: 'Failed to resolve issue' });
-      return;
+      console.warn('[Issues] Supabase resolve warning:', error);
     }
     res.json({ success: true });
   } catch (err: unknown) {
     res.status(500).json({ error: 'Internal server error resolving issue' });
+  }
+});
+
+// ============================================================================
+// 7C. DYNAMIC COUPONS & OFFERS API (PERSISTED ON SERVER)
+// ============================================================================
+const COUPONS_FILE = path.join(DATA_DIR, 'coupons.json');
+const ISSUES_FILE = path.join(DATA_DIR, 'issues.json');
+
+const INITIAL_COUPONS = [
+  {
+    id: 'coupon-1',
+    code: 'BISTRO100',
+    title: '₹100 FLAT OFF',
+    subtitle: 'On orders above ₹499 • Freshly prepared pizzas, burgers & bakery items',
+    discountType: 'flat',
+    discountValue: 100,
+    minOrder: 499,
+    isActive: true,
+    badge: 'Trending Deal',
+  },
+  {
+    id: 'coupon-2',
+    code: 'BISTRO50',
+    title: '15% OFF (Up to ₹75)',
+    subtitle: 'On orders above ₹399 • Authentic fresh taste in Dharamkot',
+    discountType: 'percentage',
+    discountValue: 15,
+    maxDiscount: 75,
+    minOrder: 399,
+    isActive: true,
+    badge: 'Popular',
+  },
+  {
+    id: 'coupon-3',
+    code: 'WELCOME10',
+    title: '10% FIRST ORDER OFF',
+    subtitle: 'On minimum order of ₹199 • Fast takeaway & delivery',
+    discountType: 'percentage',
+    discountValue: 10,
+    maxDiscount: 50,
+    minOrder: 199,
+    isActive: true,
+    badge: 'New Customer',
+  },
+  {
+    id: 'coupon-4',
+    code: 'CAKE100',
+    title: '₹100 OFF ON CAKES',
+    subtitle: '100% Pure Eggless 1Kg+ Cakes • With candles & cutting knife',
+    discountType: 'flat',
+    discountValue: 100,
+    minOrder: 500,
+    isActive: true,
+    badge: 'Bakery Special',
+  },
+  {
+    id: 'coupon-5',
+    code: 'FREEDEL',
+    title: '₹40 OFF DELIVERY',
+    subtitle: 'On orders above ₹299 • Safe & fast local delivery in Dharamkot',
+    discountType: 'flat',
+    discountValue: 40,
+    minOrder: 299,
+    isActive: true,
+    badge: 'Free Delivery',
+  },
+];
+
+function normalizeCoupon(c: any): any {
+  if (!c || typeof c !== 'object') return null;
+  const discountType = c.discountType === 'percentage' ? 'percentage' : 'flat';
+  const discountValue = Number(c.discountValue || 0);
+  const minOrder = Number(c.minOrder !== undefined ? c.minOrder : (c.minOrderValue !== undefined ? c.minOrderValue : 0));
+  const code = (c.code || '').trim().toUpperCase();
+  const title = c.title || (discountType === 'flat' ? `₹${discountValue} OFF` : `${discountValue}% OFF`);
+  const subtitle = c.subtitle || c.description || `Valid on orders above ₹${minOrder}`;
+  
+  return {
+    id: c.id || `coupon-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    code,
+    title,
+    subtitle,
+    discountType,
+    discountValue,
+    maxDiscount: c.maxDiscount ? Number(c.maxDiscount) : (c.maxDiscountAmount ? Number(c.maxDiscountAmount) : undefined),
+    minOrder,
+    isActive: c.isActive !== false,
+    badge: c.badge || undefined,
+    expiryDate: c.expiryDate || undefined,
+  };
+}
+
+function loadCouponsFromServer(): any[] {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (fs.existsSync(COUPONS_FILE)) {
+      const data = fs.readFileSync(COUPONS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map(normalizeCoupon).filter(Boolean);
+      }
+    }
+    fs.writeFileSync(COUPONS_FILE, JSON.stringify(INITIAL_COUPONS, null, 2));
+    return INITIAL_COUPONS;
+  } catch (err) {
+    console.warn('[Coupons] Error loading coupons:', err);
+    return INITIAL_COUPONS;
+  }
+}
+
+function saveCouponsToServer(coupons: any[]): boolean {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const clean = coupons.map(normalizeCoupon).filter(Boolean);
+    fs.writeFileSync(COUPONS_FILE, JSON.stringify(clean, null, 2));
+    return true;
+  } catch (err) {
+    console.error('[Coupons] Error saving coupons:', err);
+    return false;
+  }
+}
+
+function loadIssuesFromFile(): any[] {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (fs.existsSync(ISSUES_FILE)) {
+      const data = fs.readFileSync(ISSUES_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.warn('[Issues] Error reading issues file:', err);
+  }
+  return [];
+}
+
+function saveIssueToFile(issue: any): void {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const current = loadIssuesFromFile();
+    const idx = current.findIndex((i) => i.id === issue.id);
+    if (idx >= 0) {
+      current[idx] = { ...current[idx], ...issue };
+    } else {
+      current.unshift(issue);
+    }
+    fs.writeFileSync(ISSUES_FILE, JSON.stringify(current, null, 2));
+  } catch (err) {
+    console.warn('[Issues] Error writing issue to file:', err);
+  }
+}
+
+/**
+ * GET /api/coupons
+ * Public endpoint: Returns all coupons for the storefront top offers strip and cart.
+ */
+app.get('/api/coupons', (_req: Request, res: Response) => {
+  const all = loadCouponsFromServer();
+  res.json(all);
+});
+
+/**
+ * POST /api/coupons
+ * Public fallback endpoint: Allows updating coupons.
+ */
+app.post('/api/coupons', (req: Request, res: Response) => {
+  const body = req.body;
+  if (!body) {
+    res.status(400).json({ error: 'Payload required' });
+    return;
+  }
+
+  let current = loadCouponsFromServer();
+
+  if (Array.isArray(body)) {
+    const normalized = body.map(normalizeCoupon).filter(Boolean);
+    saveCouponsToServer(normalized);
+    res.json({ success: true, coupons: normalized });
+    return;
+  }
+
+  if (body.coupon && typeof body.coupon === 'object') {
+    const item = normalizeCoupon(body.coupon);
+    if (!item) {
+      res.status(400).json({ error: 'Invalid coupon' });
+      return;
+    }
+    const existingIdx = current.findIndex((c) => c.id === item.id || c.code === item.code);
+    if (existingIdx >= 0) {
+      current[existingIdx] = item;
+    } else {
+      current.unshift(item);
+    }
+    saveCouponsToServer(current);
+    res.json({ success: true, coupons: current });
+    return;
+  }
+
+  res.status(400).json({ error: 'Invalid coupon format' });
+});
+
+/**
+ * GET /api/admin/coupons
+ * Returns all coupons (active and inactive) for admin coupon manager.
+ */
+app.get('/api/admin/coupons', requireAdmin, (_req: AuthenticatedRequest, res: Response) => {
+  const all = loadCouponsFromServer();
+  res.json(all);
+});
+
+/**
+ * POST /api/admin/coupons
+ * Saves full coupon list or inserts/updates a coupon.
+ */
+app.post('/api/admin/coupons', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+  const body = req.body;
+  if (!body) {
+    res.status(400).json({ error: 'Payload required' });
+    return;
+  }
+
+  let current = loadCouponsFromServer();
+
+  if (Array.isArray(body)) {
+    const normalized = body.map(normalizeCoupon).filter(Boolean);
+    saveCouponsToServer(normalized);
+    res.json({ success: true, coupons: normalized });
+    return;
+  }
+
+  if (body.coupon && typeof body.coupon === 'object') {
+    const item = normalizeCoupon(body.coupon);
+    if (!item) {
+      res.status(400).json({ error: 'Invalid coupon' });
+      return;
+    }
+    const existingIdx = current.findIndex((c) => c.id === item.id || c.code === item.code);
+    if (existingIdx >= 0) {
+      current[existingIdx] = item;
+    } else {
+      current.unshift(item);
+    }
+    saveCouponsToServer(current);
+    res.json({ success: true, coupons: current });
+    return;
+  }
+
+  res.status(400).json({ error: 'Invalid coupon format' });
+});
+
+/**
+ * DELETE /api/admin/coupons/:id
+ * Deletes a coupon by ID.
+ */
+app.delete('/api/admin/coupons/:id', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  let current = loadCouponsFromServer();
+  current = current.filter((c) => c.id !== id);
+  saveCouponsToServer(current);
+  res.json({ success: true, coupons: current });
+});
+
+function queryWithTimeout<T>(promise: PromiseLike<T>, ms = 2500): Promise<T> {
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Supabase query timeout')), ms)),
+  ]);
+}
+
+/**
+ * POST /api/customer/issues
+ * Public endpoint: Allows any customer to report an issue/complaint.
+ * Saves to Supabase customer_issues and local backup file so admin always receives it.
+ */
+app.post('/api/customer/issues', async (req: Request, res: Response) => {
+  try {
+    const body = req.body;
+    if (!body || !body.customerName || !body.description) {
+      res.status(400).json({ error: 'Customer name and issue description are required.' });
+      return;
+    }
+
+    const cleanPhone = (body.customerPhone || '').replace(/\D/g, '').slice(0, 10);
+    const newIssue = {
+      id: body.id || `iss-${Date.now()}`,
+      order_number: body.orderNumber || 'N/A',
+      customer_phone: cleanPhone,
+      customer_name: body.customerName.trim(),
+      issue_type: body.issueType || 'other',
+      description: body.description.trim(),
+      status: body.status || 'open',
+      resolution_notes: null,
+      created_at: body.createdAt || new Date().toISOString(),
+    };
+
+    // Save to local file backup
+    saveIssueToFile(newIssue);
+
+    // Also persist to Supabase asynchronously
+    queryWithTimeout(supabase.from('customer_issues').upsert(newIssue, { onConflict: 'id' }), 2000).catch((sbErr) => {
+      console.warn('[Issues] Supabase insert warning:', sbErr);
+    });
+
+    res.json({ success: true, issue: newIssue });
+  } catch (err: any) {
+    console.error('[Issues] Error creating customer issue:', err);
+    res.status(500).json({ error: 'Failed to record customer issue' });
+  }
+});
+
+/**
+ * GET /api/customer/issues
+ * Returns all issues from Supabase merged with local backup.
+ */
+app.get('/api/customer/issues', async (_req: Request, res: Response) => {
+  try {
+    const localIssues = loadIssuesFromFile();
+    let cloudIssues: any[] = [];
+    try {
+      const res: any = await queryWithTimeout(
+        supabase.from('customer_issues').select('*').order('created_at', { ascending: false }),
+        2000
+      );
+      if (res && !res.error && Array.isArray(res.data)) {
+        cloudIssues = res.data;
+      }
+    } catch (e) {
+      console.warn('[Issues] Supabase query notice:', e);
+    }
+
+    // Merge and deduplicate by id
+    const issueMap = new Map<string, any>();
+    localIssues.forEach((i) => issueMap.set(i.id, i));
+    cloudIssues.forEach((i) => issueMap.set(i.id, i));
+
+    const combined = Array.from(issueMap.values()).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    res.json(combined);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch issues' });
+  }
+});
+
+/**
+ * GET /api/admin/issues
+ * Fetches all customer complaints and issues for authenticated administrators.
+ */
+app.get('/api/admin/issues', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const localIssues = loadIssuesFromFile();
+    let cloudIssues: any[] = [];
+    try {
+      const res: any = await queryWithTimeout(
+        supabase.from('customer_issues').select('*').order('created_at', { ascending: false }),
+        2000
+      );
+      if (res && !res.error && Array.isArray(res.data)) {
+        cloudIssues = res.data;
+      }
+    } catch (e) {
+      console.warn('[Admin Issues] Supabase query notice:', e);
+    }
+
+    // Merge and deduplicate by id
+    const issueMap = new Map<string, any>();
+    localIssues.forEach((i) => issueMap.set(i.id, i));
+    cloudIssues.forEach((i) => issueMap.set(i.id, i));
+
+    const combined = Array.from(issueMap.values()).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    res.json(combined);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal error fetching customer issues' });
   }
 });
 

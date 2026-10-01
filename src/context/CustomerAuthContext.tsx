@@ -52,8 +52,8 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
           fullName: currentName || currentUserEmail?.split('@')[0] || 'Customer',
           email: currentUserEmail || '',
           city: 'Dharamkot',
-          state: 'Himachal Pradesh',
-          pincode: '176219',
+          state: 'Punjab',
+          pincode: '142042',
         };
         await saveCustomerProfileToCloud(profile);
       }

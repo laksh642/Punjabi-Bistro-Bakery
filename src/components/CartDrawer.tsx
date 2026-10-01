@@ -11,6 +11,7 @@ import {
   Tag,
   ShieldCheck,
   CheckCircle2,
+  Check,
   AlertCircle,
   QrCode,
   MessageCircle,
@@ -67,6 +68,9 @@ export const CartDrawer: React.FC = () => {
   const [customerPhone, setCustomerPhone] = useState(() => {
     try { return sessionStorage.getItem('pb_draft_customer_phone') || ''; } catch { return ''; }
   });
+  const [deliveryPincode, setDeliveryPincode] = useState(() => {
+    try { return sessionStorage.getItem('pb_draft_delivery_pincode') || '142042'; } catch { return '142042'; }
+  });
   const [customerEmail, setCustomerEmail] = useState('');
   const [selectedZoneId, setSelectedZoneId] = useState<string>(() => {
     try { return sessionStorage.getItem('pb_draft_zone_id') || deliveryZones[0]?.id || 'zone-1'; } catch { return deliveryZones[0]?.id || 'zone-1'; }
@@ -100,12 +104,13 @@ export const CartDrawer: React.FC = () => {
       if (customerName) sessionStorage.setItem('pb_draft_customer_name', customerName);
       if (customerPhone) sessionStorage.setItem('pb_draft_customer_phone', customerPhone);
       if (deliveryAddress) sessionStorage.setItem('pb_draft_delivery_address', deliveryAddress);
+      if (deliveryPincode) sessionStorage.setItem('pb_draft_delivery_pincode', deliveryPincode);
       if (landmark) sessionStorage.setItem('pb_draft_landmark', landmark);
       if (orderNotes) sessionStorage.setItem('pb_draft_order_notes', orderNotes);
       if (orderType) sessionStorage.setItem('pb_draft_order_type', orderType);
       if (selectedZoneId) sessionStorage.setItem('pb_draft_zone_id', selectedZoneId);
     } catch {}
-  }, [customerName, customerPhone, deliveryAddress, landmark, orderNotes, orderType, selectedZoneId]);
+  }, [customerName, customerPhone, deliveryAddress, deliveryPincode, landmark, orderNotes, orderType, selectedZoneId]);
 
   // Auto-advance to checkout if user completed Google login after clicking checkout
   React.useEffect(() => {
@@ -206,14 +211,31 @@ export const CartDrawer: React.FC = () => {
       return;
     }
 
-    if (!customerName.trim() || !customerPhone.trim()) {
-      setErrorMessage('Please enter your name and contact phone number.');
+    if (!customerName.trim()) {
+      setErrorMessage('Please enter your full name.');
       return;
     }
 
-    if (orderType === 'delivery' && !deliveryAddress.trim()) {
-      setErrorMessage('Please enter your complete delivery address in Dharamkot.');
+    const cleanDigits = customerPhone.replace(/\D/g, '');
+    if (cleanDigits.length !== 10) {
+      setErrorMessage('Phone number must be exactly 10 digits.');
       return;
+    }
+
+    if (orderType === 'delivery') {
+      const cleanPin = deliveryPincode.trim();
+      if (!cleanPin) {
+        setErrorMessage('Please enter your delivery pincode.');
+        return;
+      }
+      if (cleanPin !== '142042') {
+        setErrorMessage(`No delivery available for pincode ${cleanPin}. Delivery is currently only available for 142042 (Dharamkot region).`);
+        return;
+      }
+      if (!deliveryAddress.trim()) {
+        setErrorMessage('Please enter your complete delivery address in Dharamkot.');
+        return;
+      }
     }
 
     setErrorMessage(null);
@@ -246,6 +268,7 @@ export const CartDrawer: React.FC = () => {
       upiTxnId: upiTxnId.trim() || undefined,
       orderNotes: orderNotes.trim() || undefined,
       contactlessDelivery,
+      isNoContactDelivery: contactlessDelivery,
     });
 
     // Ensure polished minimum transition so success animation doesn't flash unnaturally
@@ -673,19 +696,64 @@ export const CartDrawer: React.FC = () => {
                   placeholder="Your Full Name *"
                   className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
                 />
-                <input
-                  type="tel"
-                  required
-                  value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value)}
-                  placeholder="Phone Number (10 digits) *"
-                  className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
-                />
+                <div className="space-y-1">
+                  <input
+                    type="tel"
+                    required
+                    maxLength={10}
+                    value={customerPhone}
+                    onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                    placeholder="Phone Number (10 digits) *"
+                    className={`w-full text-xs px-3.5 py-2.5 rounded-xl border bg-white text-emerald-950 focus:outline-none ${
+                      customerPhone && customerPhone.length !== 10
+                        ? 'border-amber-400 focus:border-amber-500'
+                        : 'border-emerald-200 focus:border-emerald-600'
+                    }`}
+                  />
+                  {customerPhone && customerPhone.length !== 10 && (
+                    <p className="text-[10px] text-amber-700 font-medium">
+                      Phone number must be exactly 10 digits ({customerPhone.length}/10)
+                    </p>
+                  )}
+                </div>
               </div>
 
               {/* Specific fields for Delivery */}
               {orderType === 'delivery' && (
                 <div className="space-y-3 pt-2 border-t border-emerald-100">
+                  {/* Pincode Verification */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900">
+                        Delivery Pincode *
+                      </label>
+                      <span className="text-[10px] text-emerald-700 font-medium">Hub: 142042</span>
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      maxLength={6}
+                      value={deliveryPincode}
+                      onChange={(e) => setDeliveryPincode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="Enter Delivery Pincode (e.g. 142042) *"
+                      className={`w-full text-xs px-3.5 py-2 rounded-xl border bg-white text-emerald-950 focus:outline-none ${
+                        deliveryPincode && deliveryPincode.trim() !== '142042'
+                          ? 'border-rose-400 bg-rose-50/50 text-rose-950 focus:border-rose-500'
+                          : 'border-emerald-200 focus:border-emerald-600'
+                      }`}
+                    />
+                    {deliveryPincode && deliveryPincode.trim() !== '142042' ? (
+                      <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-[11px] font-semibold flex items-start gap-1.5 animate-in fade-in">
+                        <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                        <span>No delivery available for pincode {deliveryPincode}. Delivery is currently only available for 142042 (Dharamkot region).</span>
+                      </div>
+                    ) : deliveryPincode.trim() === '142042' ? (
+                      <p className="text-[10px] text-emerald-700 font-medium flex items-center gap-1">
+                        <Check className="w-3 h-3 text-emerald-600" /> Delivery available for Dharamkot region (142042)
+                      </p>
+                    ) : null}
+                  </div>
+
                   <div className="flex items-center justify-between">
                     <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900">
                       Dharamkot Delivery Zone
@@ -861,14 +929,22 @@ export const CartDrawer: React.FC = () => {
                 {user ? (
                   <button
                     type="submit"
-                    disabled={isPlacingOrder}
-                    className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs sm:text-sm py-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                    disabled={
+                      isPlacingOrder ||
+                      (orderType === 'delivery' && deliveryPincode.trim() !== '142042') ||
+                      customerPhone.replace(/\D/g, '').length !== 10
+                    }
+                    className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs sm:text-sm py-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:bg-stone-500 disabled:cursor-not-allowed"
                   >
                     {isPlacingOrder ? (
                       <>
                         <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                         <span>Sending to Bakery...</span>
                       </>
+                    ) : orderType === 'delivery' && deliveryPincode.trim() !== '142042' ? (
+                      <span>No Delivery for Pincode {deliveryPincode || 'Entered'}</span>
+                    ) : customerPhone.replace(/\D/g, '').length !== 10 ? (
+                      <span>Enter 10-digit Phone Number</span>
                     ) : (
                       <>
                         <span>Place Bakery Order • ₹{finalTotal}</span>

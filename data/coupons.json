@@ -1,0 +1,66 @@
+[
+  {
+    "id": "coupon-special-festive",
+    "code": "FESTIVE25",
+    "title": "25% DIWALI SPECIAL",
+    "subtitle": "On all orders above ₹499",
+    "discountType": "percentage",
+    "discountValue": 25,
+    "maxDiscount": 125,
+    "minOrder": 499,
+    "isActive": true,
+    "badge": "Festival Special"
+  },
+  {
+    "id": "c-welcome",
+    "code": "WELCOME50",
+    "title": "₹50 OFF",
+    "subtitle": "Flat ₹50 OFF on your first Punjabi Bistro order",
+    "discountType": "flat",
+    "discountValue": 50,
+    "minOrder": 299,
+    "isActive": true
+  },
+  {
+    "id": "c-sweet10",
+    "code": "SWEET10",
+    "title": "10% OFF",
+    "subtitle": "10% OFF on gourmet cakes, pastries & cookies",
+    "discountType": "percentage",
+    "discountValue": 10,
+    "maxDiscount": 100,
+    "minOrder": 350,
+    "isActive": true
+  },
+  {
+    "id": "c-festive100",
+    "code": "FESTIVE100",
+    "title": "₹100 OFF",
+    "subtitle": "₹100 OFF on celebration orders above ₹699",
+    "discountType": "flat",
+    "discountValue": 100,
+    "minOrder": 699,
+    "isActive": true
+  },
+  {
+    "id": "c-freeship",
+    "code": "FREESHIP",
+    "title": "₹0 OFF",
+    "subtitle": "Free zero-fee delivery across Dharamkot (142042)",
+    "discountType": "flat",
+    "discountValue": 0,
+    "minOrder": 450,
+    "isActive": true
+  },
+  {
+    "id": "c-bistro20",
+    "code": "BISTRO20",
+    "title": "20% OFF",
+    "subtitle": "20% OFF on grand family meals & cafe treats",
+    "discountType": "percentage",
+    "discountValue": 20,
+    "maxDiscount": 150,
+    "minOrder": 800,
+    "isActive": true
+  }
+]

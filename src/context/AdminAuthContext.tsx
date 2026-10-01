@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User, Session } from '@supabase/supabase-js';
-import { adminSupabase, verifyIsAdminUser } from '../lib/supabase';
+import { supabase, adminSupabase, verifyIsAdminUser } from '../lib/supabase';
 
 const ADMIN_TOKEN_KEY = 'pb_admin_session_token';
 
@@ -64,6 +64,15 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     const email = session.user.email || '';
+
+    // 1. Verify if user is authenticated with Google
+    const isGoogleAuth =
+      session.user.app_metadata?.provider === 'google' ||
+      session.user.identities?.some((id: any) => id.provider === 'google') ||
+      Boolean(session.user.user_metadata?.email_verified) ||
+      Boolean(session.user.email_confirmed_at);
+
+    // 2. Authoritatively verify if this email is in the admin_users table (or verified owner)
     const isAuthorized = await verifyIsAdminUser(email);
 
     if (isAuthorized) {
@@ -77,8 +86,13 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       } catch {}
       return true;
     } else {
-      // Authenticated with Supabase, but not an authorized admin
-      await adminSupabase.auth.signOut();
+      // Authenticated with Google/Supabase, but not in admin_users table
+      const errorMsg = `Access Denied: The Google account "${email}" is not registered in the admin_users table. Please ensure "${email}" is added to your Supabase admin_users table.`;
+      setAuthError(errorMsg);
+      try {
+        await adminSupabase.auth.signOut();
+        await supabase.auth.signOut();
+      } catch {}
       setAdminUser(null);
       setAdminEmail(null);
       setIsAuthenticated(false);
@@ -96,10 +110,20 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     async function initAdminAuth() {
       try {
-        const { data: { session } } = await adminSupabase.auth.getSession();
+        let activeSession: Session | null = null;
+        const { data: adminRes } = await adminSupabase.auth.getSession();
+        if (adminRes?.session) {
+          activeSession = adminRes.session;
+        } else {
+          const { data: mainRes } = await supabase.auth.getSession();
+          if (mainRes?.session) {
+            activeSession = mainRes.session;
+          }
+        }
+
         if (!isMounted) return;
-        if (session) {
-          await applySession(session);
+        if (activeSession) {
+          await applySession(activeSession);
         } else {
           setIsAuthenticated(false);
           setAdminUser(null);
@@ -121,22 +145,39 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     initAdminAuth();
 
-    const { data: { subscription } } = adminSupabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: subAdmin } = adminSupabase.auth.onAuthStateChange(async (_event, session) => {
       if (!isMounted) return;
-      await applySession(session);
+      if (session) {
+        await applySession(session);
+      }
+      setIsLoading(false);
+    });
+
+    const { data: subMain } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!isMounted) return;
+      if (session && window.location.pathname.startsWith('/admin')) {
+        await applySession(session);
+      }
       setIsLoading(false);
     });
 
     return () => {
       isMounted = false;
-      subscription.unsubscribe();
+      subAdmin.subscription.unsubscribe();
+      subMain.subscription.unsubscribe();
     };
   }, [applySession]);
 
   const refreshSession = useCallback(async (): Promise<void> => {
     try {
-      const { data: { session } } = await adminSupabase.auth.getSession();
-      await applySession(session);
+      let activeSession: Session | null = null;
+      const { data: adminRes } = await adminSupabase.auth.getSession();
+      if (adminRes?.session) activeSession = adminRes.session;
+      else {
+        const { data: mainRes } = await supabase.auth.getSession();
+        if (mainRes?.session) activeSession = mainRes.session;
+      }
+      await applySession(activeSession);
     } catch {
       setIsAuthenticated(false);
       setAdminUser(null);
@@ -205,7 +246,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const loginWithGoogle = async (): Promise<{ success: boolean; error?: string }> => {
     setAuthError(null);
     try {
-      const { error } = await adminSupabase.auth.signInWithOAuth({
+      const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: window.location.origin + '/admin',

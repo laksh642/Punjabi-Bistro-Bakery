@@ -38,6 +38,10 @@ import {
   saveReviewToCloud,
   saveCustomerIssueToCloud,
   resolveCustomerIssueInCloud,
+  fetchCustomerIssuesFromCloud,
+  fetchCouponsFromCloud,
+  saveCouponsToCloud,
+  deleteCouponFromCloud,
   fetchProductsFromCloud,
   saveProductToCloud,
   deleteProductFromCloud,
@@ -150,6 +154,7 @@ interface StoreContextType {
   updateCoupon: (coupon: Coupon) => void;
   deleteCoupon: (id: string) => void;
   toggleCouponActive: (id: string) => void;
+  loadCouponsFromCloud: () => Promise<Coupon[]>;
 
   // Orders
   orders: Order[];
@@ -182,6 +187,7 @@ interface StoreContextType {
 
   // Issues & Feedback
   issues: CustomerIssue[];
+  loadIssuesFromCloud: () => Promise<CustomerIssue[]>;
   submitIssue: (issue: Omit<CustomerIssue, 'id' | 'createdAt' | 'status'>) => void;
   resolveIssue: (id: string, notes: string) => void;
   feedbacks: CustomerFeedback[];
@@ -737,6 +743,94 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return true;
   };
 
+  const loadCouponsFromCloud = async (): Promise<Coupon[]> => {
+    try {
+      const cloudCoupons = await fetchCouponsFromCloud();
+      if (cloudCoupons && Array.isArray(cloudCoupons) && cloudCoupons.length > 0) {
+        setCoupons(cloudCoupons);
+        try {
+          localStorage.setItem('pb_coupons', JSON.stringify(cloudCoupons));
+        } catch {}
+        return cloudCoupons;
+      }
+    } catch (err) {
+      console.warn('loadCouponsFromCloud error:', err);
+    }
+    return coupons;
+  };
+
+  const loadIssuesFromCloud = async (): Promise<CustomerIssue[]> => {
+    try {
+      const cloudIssues = await fetchCustomerIssuesFromCloud();
+      if (cloudIssues && Array.isArray(cloudIssues)) {
+        setIssues(cloudIssues);
+        try {
+          localStorage.setItem('pb_issues', JSON.stringify(cloudIssues));
+        } catch {}
+        return cloudIssues;
+      }
+    } catch (err) {
+      console.warn('loadIssuesFromCloud error:', err);
+    }
+    return issues;
+  };
+
+  useEffect(() => {
+    loadCouponsFromCloud();
+    loadIssuesFromCloud();
+
+    // Cross-tab synchronization via storage & custom events
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'pb_coupons' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setCoupons(parsed);
+        } catch {}
+      }
+      if (e.key === 'pb_issues' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setIssues(parsed);
+        } catch {}
+      }
+    };
+
+    const handleCustomCouponUpdate = (e: Event) => {
+      const custom = e as CustomEvent;
+      if (custom.detail && Array.isArray(custom.detail)) {
+        setCoupons(custom.detail);
+      } else {
+        loadCouponsFromCloud();
+      }
+    };
+
+    const handleCustomIssueUpdate = (e: Event) => {
+      const custom = e as CustomEvent;
+      if (custom.detail && Array.isArray(custom.detail)) {
+        setIssues(custom.detail);
+      } else {
+        loadIssuesFromCloud();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('pb_coupons_updated', handleCustomCouponUpdate);
+    window.addEventListener('pb_issues_updated', handleCustomIssueUpdate);
+
+    // Refresh cloud coupons and complaints every 7 seconds for live sync
+    const interval = setInterval(() => {
+      loadCouponsFromCloud();
+      loadIssuesFromCloud();
+    }, 7000);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('pb_coupons_updated', handleCustomCouponUpdate);
+      window.removeEventListener('pb_issues_updated', handleCustomIssueUpdate);
+    };
+  }, []);
+
   const removeCoupon = () => {
     setAppliedCoupon(null);
     setCouponError(null);
@@ -748,7 +842,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       id: `coupon-${Date.now()}`,
       code: couponData.code.trim().toUpperCase(),
     };
-    setCoupons((prev) => [newCoupon, ...prev]);
+    const updated = [newCoupon, ...coupons];
+    setCoupons(updated);
+    saveCouponsToCloud(updated).catch((err) => {
+      console.warn('saveCouponsToCloud error:', err);
+    });
   };
 
   const updateCoupon = (updatedCoupon: Coupon) => {
@@ -756,7 +854,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       ...updatedCoupon,
       code: updatedCoupon.code.trim().toUpperCase(),
     };
-    setCoupons((prev) => prev.map((c) => (c.id === formatted.id ? formatted : c)));
+    const updated = coupons.map((c) => (c.id === formatted.id ? formatted : c));
+    setCoupons(updated);
+    saveCouponsToCloud(updated).catch((err) => {
+      console.warn('saveCouponsToCloud error:', err);
+    });
     if (appliedCoupon?.id === formatted.id) {
       if (!formatted.isActive || cartSubtotal < formatted.minOrder) {
         setAppliedCoupon(null);
@@ -767,25 +869,31 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const deleteCoupon = (id: string) => {
-    setCoupons((prev) => prev.filter((c) => c.id !== id));
+    const updated = coupons.filter((c) => c.id !== id);
+    setCoupons(updated);
+    deleteCouponFromCloud(id).catch((err) => {
+      console.warn('deleteCouponFromCloud error:', err);
+    });
     if (appliedCoupon?.id === id) {
       setAppliedCoupon(null);
     }
   };
 
   const toggleCouponActive = (id: string) => {
-    setCoupons((prev) =>
-      prev.map((c) => {
-        if (c.id === id) {
-          const updated = { ...c, isActive: !c.isActive };
-          if (!updated.isActive && appliedCoupon?.id === id) {
-            setAppliedCoupon(null);
-          }
-          return updated;
+    const updated = coupons.map((c) => {
+      if (c.id === id) {
+        const up = { ...c, isActive: !c.isActive };
+        if (!up.isActive && appliedCoupon?.id === id) {
+          setAppliedCoupon(null);
         }
-        return c;
-      })
-    );
+        return up;
+      }
+      return c;
+    });
+    setCoupons(updated);
+    saveCouponsToCloud(updated).catch((err) => {
+      console.warn('saveCouponsToCloud error:', err);
+    });
   };
 
   // Product Admin Operations
@@ -1087,7 +1195,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
     setIssues((prev) => [newIssue, ...prev]);
 
-    saveCustomerIssueToCloud(newIssue).catch((err) => {
+    saveCustomerIssueToCloud(newIssue).then(() => {
+      loadIssuesFromCloud();
+    }).catch((err) => {
       console.warn('Supabase saveCustomerIssue error:', err);
     });
   };
@@ -1099,7 +1209,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       )
     );
 
-    resolveCustomerIssueInCloud(id, notes).catch((err) => {
+    resolveCustomerIssueInCloud(id, notes).then(() => {
+      loadIssuesFromCloud();
+    }).catch((err) => {
       console.warn('Supabase resolveCustomerIssue error:', err);
     });
   };
@@ -1213,6 +1325,7 @@ _Sent via Punjabi Bistro & Bakery Dharamkot Website_`;
         updateCoupon,
         deleteCoupon,
         toggleCouponActive,
+        loadCouponsFromCloud,
 
         orders,
         currentOrder,
@@ -1235,6 +1348,7 @@ _Sent via Punjabi Bistro & Bakery Dharamkot Website_`;
         updateCakeEnquiry,
 
         issues,
+        loadIssuesFromCloud,
         submitIssue,
         resolveIssue,
         feedbacks,

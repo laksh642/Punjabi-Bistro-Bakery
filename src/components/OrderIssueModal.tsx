@@ -11,20 +11,27 @@ export const OrderIssueModal: React.FC = () => {
   const [customerPhone, setCustomerPhone] = useState('');
   const [issueType, setIssueType] = useState<CustomerIssue['issueType']>('late_delivery');
   const [description, setDescription] = useState('');
+  const [phoneError, setPhoneError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
   if (!isIssueModalOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customerName.trim() || !customerPhone.trim() || !description.trim()) {
+    const cleanDigits = customerPhone.replace(/\D/g, '');
+    if (!customerName.trim() || !description.trim()) {
       return;
     }
+    if (cleanDigits.length !== 10) {
+      setPhoneError('Phone number must be exactly 10 digits.');
+      return;
+    }
+    setPhoneError(null);
 
     submitIssue({
       orderNumber: orderNumber.trim() || 'N/A',
       customerName: customerName.trim(),
-      customerPhone: customerPhone.trim(),
+      customerPhone: cleanDigits,
       issueType,
       description: description.trim(),
     });
@@ -128,11 +135,20 @@ export const OrderIssueModal: React.FC = () => {
                   <input
                     type="tel"
                     required
+                    maxLength={10}
                     value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
-                    placeholder="e.g. 98551 12233"
+                    onChange={(e) => {
+                      setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 10));
+                      setPhoneError(null);
+                    }}
+                    placeholder="10-digit mobile number"
                     className="w-full text-xs px-3 py-2 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
                   />
+                  {phoneError ? (
+                    <p className="text-[10px] text-rose-600 font-medium mt-1">{phoneError}</p>
+                  ) : customerPhone && customerPhone.length !== 10 ? (
+                    <p className="text-[10px] text-amber-700 font-medium mt-1">{customerPhone.length}/10 digits</p>
+                  ) : null}
                 </div>
               </div>
 
