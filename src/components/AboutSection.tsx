@@ -26,8 +26,8 @@ export const AboutSection: React.FC = () => {
               </div>
             </div>
 
-            {/* Inset badge */}
-            <div className="absolute -bottom-4 -right-4 bg-white border border-emerald-100 p-3.5 rounded-2xl shadow-lg max-w-xs text-left">
+            {/* Inset badge (Non-overlapping on mobile) */}
+            <div className="relative sm:absolute sm:-bottom-4 sm:-right-4 bg-white border border-emerald-100 p-3.5 rounded-2xl shadow-lg max-w-xs text-left mt-3 sm:mt-0">
               <div className="flex items-center gap-2 text-emerald-800 font-bold text-xs">
                 <ShieldCheck className="w-4 h-4 text-emerald-700" />
                 <span>100% Pure Eggless Bakery</span>

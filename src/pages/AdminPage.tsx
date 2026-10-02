@@ -47,11 +47,11 @@ export const AdminPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-stone-50 text-stone-900 font-sans antialiased selection:bg-emerald-100 selection:text-emerald-900">
       {/* Top Banner with Authorized Admin Status, Storefront Switcher, and Sign Out Button */}
-      <header className="bg-emerald-950 text-white text-xs py-2.5 px-4 sm:px-6 border-b border-emerald-900 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
+      <header className="bg-emerald-950 text-white text-xs py-2 px-3 sm:px-6 border-b border-emerald-900 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="font-semibold tracking-wide">Operations Portal</span>
+            <span className="font-semibold tracking-wide text-xs">Operations Portal</span>
           </div>
 
           <span className="hidden sm:inline-block px-2 py-0.5 rounded-full bg-emerald-900 text-[10px] text-emerald-200 border border-emerald-800">
@@ -68,27 +68,27 @@ export const AdminPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             type="button"
             id="btn-admin-sign-out"
             onClick={logout}
-            className="inline-flex items-center gap-1.5 bg-rose-900/80 hover:bg-rose-800 active:scale-[0.98] text-rose-100 border border-rose-700/60 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+            className="inline-flex items-center gap-1 bg-rose-900/80 hover:bg-rose-800 active:scale-[0.98] text-rose-100 border border-rose-700/60 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer"
             title="Sign out of Administrator Session"
           >
             <LogOut className="w-3.5 h-3.5" />
-            <span>Sign Out</span>
+            <span className="hidden xs:inline">Sign Out</span>
           </button>
 
           <Link
             to="/"
             id="btn-admin-return-storefront"
             onClick={() => setIsAdminView(false)}
-            className="inline-flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-700 active:scale-[0.98] text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
+            className="inline-flex items-center gap-1 bg-emerald-800 hover:bg-emerald-700 active:scale-[0.98] text-white px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-xs font-semibold transition-colors"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             <Store className="w-3.5 h-3.5" />
-            <span>Storefront</span>
+            <span className="hidden xs:inline">Storefront</span>
           </Link>
         </div>
       </header>

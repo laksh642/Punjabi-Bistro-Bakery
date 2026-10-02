@@ -14,7 +14,7 @@ export const MobileBottomBar: React.FC = () => {
   const { user, setIsMyOrdersOpen, openLoginModal } = useCustomerAuth();
 
   return (
-    <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-emerald-100 p-2.5 px-3 shadow-lg">
+    <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-emerald-100 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] px-3 shadow-lg">
       <div className="flex items-center justify-between gap-1.5 max-w-lg mx-auto">
         {/* Call button */}
         <a

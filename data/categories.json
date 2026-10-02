@@ -1,0 +1,50 @@
+[
+  {
+    "id": "all",
+    "name": "All Items",
+    "icon": "Sparkles",
+    "count": 24
+  },
+  {
+    "id": "cakes",
+    "name": "Cakes & Pastries",
+    "icon": "Cake",
+    "count": 6
+  },
+  {
+    "id": "pasta",
+    "name": "Pasta & Italian",
+    "icon": "UtensilsCrossed",
+    "count": 4
+  },
+  {
+    "id": "pizza",
+    "name": "Handcrafted Pizza",
+    "icon": "Pizza",
+    "count": 4
+  },
+  {
+    "id": "burgers",
+    "name": "Burgers & Wraps",
+    "icon": "Sandwich",
+    "count": 4
+  },
+  {
+    "id": "sandwiches",
+    "name": "Grilled Sandwiches",
+    "icon": "Layers",
+    "count": 3
+  },
+  {
+    "id": "fries",
+    "name": "Fries & Quick Bites",
+    "icon": "Flame",
+    "count": 3
+  },
+  {
+    "id": "beverages",
+    "name": "Drinks & Fruit Beer",
+    "icon": "Coffee",
+    "count": 4
+  }
+]

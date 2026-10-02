@@ -61,6 +61,7 @@ export const AdminDashboard: React.FC = () => {
     updateCakeEnquiry,
     deliveryZones,
     updateDeliveryZone,
+    saveAllDeliveryZones,
     businessSettings,
     updateBusinessSettings,
     issues,
@@ -73,6 +74,79 @@ export const AdminDashboard: React.FC = () => {
     syncWithCloud,
   } = useStore();
   const { updatePassword } = useAdminAuth();
+
+  // Settings & Zones Cloud Persistence Form State
+  const [settingsForm, setSettingsForm] = useState(businessSettings);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [settingsFeedback, setSettingsFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  useEffect(() => {
+    setSettingsForm(businessSettings);
+  }, [businessSettings]);
+
+  const [zonesForm, setZonesForm] = useState(deliveryZones);
+  const [isSavingZones, setIsSavingZones] = useState(false);
+  const [zonesFeedback, setZonesFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  useEffect(() => {
+    setZonesForm(deliveryZones);
+  }, [deliveryZones]);
+
+  const handleSaveSettingsSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingSettings(true);
+    setSettingsFeedback(null);
+    try {
+      const ok = await updateBusinessSettings(settingsForm);
+      if (ok) {
+        setSettingsFeedback({
+          type: 'success',
+          message: '✓ Settings saved to database & synchronized across all devices!',
+        });
+      } else {
+        setSettingsFeedback({
+          type: 'error',
+          message: 'Settings updated locally, but server response was delayed. Syncing in background.',
+        });
+      }
+      setTimeout(() => setSettingsFeedback(null), 4000);
+    } catch (err: any) {
+      setSettingsFeedback({
+        type: 'error',
+        message: err.message || 'Failed to save settings. Please try again.',
+      });
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const handleSaveZonesSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingZones(true);
+    setZonesFeedback(null);
+    try {
+      const ok = await saveAllDeliveryZones(zonesForm);
+      if (ok) {
+        setZonesFeedback({
+          type: 'success',
+          message: '✓ Delivery zones saved to database & synchronized across all devices!',
+        });
+      } else {
+        setZonesFeedback({
+          type: 'error',
+          message: 'Zones updated locally, but server response was delayed. Syncing in background.',
+        });
+      }
+      setTimeout(() => setZonesFeedback(null), 4000);
+    } catch (err: any) {
+      setZonesFeedback({
+        type: 'error',
+        message: err.message || 'Failed to save delivery zones. Please try again.',
+      });
+    } finally {
+      setIsSavingZones(false);
+    }
+  };
 
   // Alert sound and banner notification state
   const [newOrderAlert, setNewOrderAlert] = useState<{
@@ -88,6 +162,7 @@ export const AdminDashboard: React.FC = () => {
 
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isRefreshingIssues, setIsRefreshingIssues] = useState(false);
+  const [mobileStatusTab, setMobileStatusTab] = useState<'all' | 'new' | 'preparing' | 'ready' | 'delivered' | 'cancelled'>('all');
   const knownOrderIdsRef = useRef<Set<string>>(new Set());
   const isInitialMountRef = useRef<boolean>(true);
 
@@ -438,29 +513,29 @@ export const AdminDashboard: React.FC = () => {
     <div className="min-h-screen bg-stone-50 text-stone-900">
       {/* Top Operations Header Bar */}
       <header className="bg-emerald-950 text-white sticky top-0 z-30 shadow-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-3">
-              <PunjabiBistroLogo className="w-10 h-10" />
-              <div>
-                <h1 className="font-serif font-bold text-base sm:text-lg leading-tight text-white">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex flex-wrap items-center justify-between min-h-[3.5rem] py-2 sm:py-2.5 gap-2">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <PunjabiBistroLogo className="w-8 h-8 sm:w-10 sm:h-10 shrink-0" />
+              <div className="min-w-0">
+                <h1 className="font-serif font-bold text-sm sm:text-base lg:text-lg leading-tight text-white truncate">
                   Punjabi Bistro Operations Portal
                 </h1>
-                <p className="text-[11px] text-emerald-300">
-                  Near Udham Singh Chowk, Dharamkot • Live Kitchen Board
+                <p className="text-[10px] sm:text-[11px] text-emerald-300 truncate max-w-[180px] xs:max-w-[240px] sm:max-w-none">
+                  Near Udham Singh Chowk, Dharamkot • Live Board
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 sm:gap-3">
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
               {/* Live Kitchen Sync Status Pill */}
               <div
-                className="flex items-center gap-1.5 bg-emerald-900/80 border border-emerald-800 px-2.5 sm:px-3 py-1.5 rounded-full text-xs"
+                className="flex items-center gap-1 bg-emerald-900/80 border border-emerald-800 px-2 py-1 rounded-full text-[10px] sm:text-xs"
                 title="Live kitchen synchronization"
               >
-                <Cloud className="w-3.5 h-3.5 text-emerald-300" />
-                <span className="text-emerald-100 font-medium text-[11px] hidden md:inline">
-                  Live Sync
+                <Cloud className="w-3 h-3 text-emerald-300" />
+                <span className="text-emerald-100 font-medium hidden sm:inline text-[11px]">
+                  Live
                 </span>
                 <span
                   className={`w-2 h-2 rounded-full ${
@@ -478,10 +553,10 @@ export const AdminDashboard: React.FC = () => {
                   playTingSound();
                 }}
                 title="Test bakery order ting chime sound"
-                className="flex items-center gap-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/60 text-amber-200 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-xs active:scale-95"
+                className="flex items-center gap-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/60 text-amber-200 px-2.5 py-1 rounded-xl text-[11px] font-semibold transition-all cursor-pointer shadow-xs active:scale-95"
               >
-                <Volume2 className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
-                <span className="hidden sm:inline text-[11px]">Test Ting Sound 🔔</span>
+                <Volume2 className="w-3.5 h-3.5 text-amber-300" />
+                <span className="hidden sm:inline">Ting Sound 🔔</span>
               </button>
 
               {/* Quick Sync Button */}
@@ -489,10 +564,10 @@ export const AdminDashboard: React.FC = () => {
                 onClick={() => syncWithCloud()}
                 disabled={isCloudSyncing}
                 title="Refresh live orders"
-                className="flex items-center gap-1 bg-emerald-900/80 hover:bg-emerald-900 border border-emerald-800 text-emerald-200 hover:text-white px-2.5 py-1.5 rounded-xl text-xs transition-all disabled:opacity-50 cursor-pointer"
+                className="flex items-center gap-1 bg-emerald-900/80 hover:bg-emerald-900 border border-emerald-800 text-emerald-200 hover:text-white px-2 py-1 rounded-xl text-[11px] transition-all disabled:opacity-50 cursor-pointer"
               >
-                <RefreshCw className={`w-3.5 h-3.5 text-emerald-300 ${isCloudSyncing ? 'animate-spin' : ''}`} />
-                <span className="hidden sm:inline text-[11px]">{isCloudSyncing ? 'Syncing...' : 'Sync'}</span>
+                <RefreshCw className={`w-3 h-3 text-emerald-300 ${isCloudSyncing ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">{isCloudSyncing ? 'Syncing...' : 'Sync'}</span>
               </button>
 
               {/* Manual Open / Close quick toggle */}
@@ -503,45 +578,37 @@ export const AdminDashboard: React.FC = () => {
                     isOpenManual: !businessSettings.isOpenManual,
                   })
                 }
-                className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full transition-all cursor-pointer ${
+                className={`flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full transition-all cursor-pointer ${
                   businessSettings.isOpenManual
                     ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
                     : 'bg-rose-700 hover:bg-rose-600 text-white'
                 }`}
               >
-                <Power className="w-3.5 h-3.5" />
-                <span>{businessSettings.isOpenManual ? 'Store: OPEN' : 'Store: CLOSED'}</span>
-              </button>
-
-              {/* Exit to customer view */}
-              <button
-                onClick={() => setIsAdminView(false)}
-                className="bg-white hover:bg-emerald-50 text-emerald-950 text-xs font-bold px-3.5 py-1.5 rounded-xl shadow-xs transition-colors cursor-pointer"
-              >
-                ← Back to Storefront
+                <Power className="w-3 h-3" />
+                <span>{businessSettings.isOpenManual ? 'OPEN' : 'CLOSED'}</span>
               </button>
             </div>
           </div>
 
-          {/* Nav Tabs */}
-          <div className="flex items-center gap-1 overflow-x-auto pb-2 scrollbar-none text-xs font-medium">
+          {/* Nav Tabs (Smooth horizontal scrolling on mobile, zero overlap) */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-2 scrollbar-none text-xs font-medium no-scrollbar pt-1">
             <button
               onClick={() => setActiveTab('orders')}
-              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
                 activeTab === 'orders'
-                  ? 'bg-emerald-700 text-white font-bold'
+                  ? 'bg-emerald-700 text-white font-bold shadow-xs'
                   : 'text-emerald-200 hover:bg-emerald-900'
               }`}
             >
               <Package className="w-3.5 h-3.5" />
-              <span>Orders ({activeOrders.length} active)</span>
+              <span>Orders ({activeOrders.length})</span>
             </button>
 
             <button
               onClick={() => setActiveTab('menu')}
-              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
                 activeTab === 'menu'
-                  ? 'bg-emerald-700 text-white font-bold'
+                  ? 'bg-emerald-700 text-white font-bold shadow-xs'
                   : 'text-emerald-200 hover:bg-emerald-900'
               }`}
             >
@@ -551,9 +618,9 @@ export const AdminDashboard: React.FC = () => {
 
             <button
               onClick={() => setActiveTab('cakes')}
-              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
                 activeTab === 'cakes'
-                  ? 'bg-emerald-700 text-white font-bold'
+                  ? 'bg-emerald-700 text-white font-bold shadow-xs'
                   : 'text-emerald-200 hover:bg-emerald-900'
               }`}
             >
@@ -563,9 +630,9 @@ export const AdminDashboard: React.FC = () => {
 
             <button
               onClick={() => setActiveTab('coupons')}
-              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
                 activeTab === 'coupons'
-                  ? 'bg-emerald-700 text-white font-bold'
+                  ? 'bg-emerald-700 text-white font-bold shadow-xs'
                   : 'text-emerald-200 hover:bg-emerald-900'
               }`}
             >
@@ -575,9 +642,9 @@ export const AdminDashboard: React.FC = () => {
 
             <button
               onClick={() => setActiveTab('zones')}
-              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
                 activeTab === 'zones'
-                  ? 'bg-emerald-700 text-white font-bold'
+                  ? 'bg-emerald-700 text-white font-bold shadow-xs'
                   : 'text-emerald-200 hover:bg-emerald-900'
               }`}
             >
@@ -587,21 +654,21 @@ export const AdminDashboard: React.FC = () => {
 
             <button
               onClick={() => setActiveTab('issues')}
-              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
                 activeTab === 'issues'
-                  ? 'bg-emerald-700 text-white font-bold'
+                  ? 'bg-emerald-700 text-white font-bold shadow-xs'
                   : 'text-emerald-200 hover:bg-emerald-900'
               }`}
             >
               <AlertCircle className="w-3.5 h-3.5" />
-              <span>Issue Center ({issues.filter((i) => i.status === 'open').length})</span>
+              <span>Issues ({issues.filter((i) => i.status === 'open').length})</span>
             </button>
 
             <button
               onClick={() => setActiveTab('analytics')}
-              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
                 activeTab === 'analytics'
-                  ? 'bg-emerald-700 text-white font-bold'
+                  ? 'bg-emerald-700 text-white font-bold shadow-xs'
                   : 'text-emerald-200 hover:bg-emerald-900'
               }`}
             >
@@ -611,9 +678,9 @@ export const AdminDashboard: React.FC = () => {
 
             <button
               onClick={() => setActiveTab('settings')}
-              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors ${
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
                 activeTab === 'settings'
-                  ? 'bg-emerald-700 text-white font-bold'
+                  ? 'bg-emerald-700 text-white font-bold shadow-xs'
                   : 'text-emerald-200 hover:bg-emerald-900'
               }`}
             >
@@ -696,10 +763,10 @@ export const AdminDashboard: React.FC = () => {
 
         {/* TAB 1: KANBAN LIVE ORDERS BOARD */}
         {activeTab === 'orders' && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
+          <div className="space-y-4 sm:space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
-                <h2 className="font-serif text-2xl font-bold text-emerald-950">
+                <h2 className="font-serif text-xl sm:text-2xl font-bold text-emerald-950">
                   Live Kitchen Order Board
                 </h2>
                 <p className="text-xs text-stone-600">
@@ -707,16 +774,82 @@ export const AdminDashboard: React.FC = () => {
                 </p>
               </div>
 
-              <div className="text-xs font-semibold text-stone-700 bg-white px-3 py-1.5 rounded-xl border border-emerald-100 shadow-2xs">
+              <div className="text-xs font-semibold text-stone-700 bg-white px-3 py-1.5 rounded-xl border border-emerald-100 shadow-2xs self-start sm:self-auto">
                 Total Orders Logged: <strong>{orders.length}</strong>
               </div>
+            </div>
+
+            {/* Mobile / Tablet Status Filter Pills */}
+            <div className="xl:hidden flex items-center gap-1.5 overflow-x-auto pb-2 scrollbar-none no-scrollbar">
+              <button
+                onClick={() => setMobileStatusTab('all')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
+                  mobileStatusTab === 'all'
+                    ? 'bg-emerald-800 text-white shadow-xs'
+                    : 'bg-white text-stone-700 border border-emerald-100 hover:bg-emerald-50'
+                }`}
+              >
+                All Columns ({orders.length})
+              </button>
+              <button
+                onClick={() => setMobileStatusTab('new')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
+                  mobileStatusTab === 'new'
+                    ? 'bg-emerald-800 text-white shadow-xs'
+                    : 'bg-white text-stone-700 border border-emerald-100 hover:bg-emerald-50'
+                }`}
+              >
+                New ({orders.filter((o) => o.status === 'new' || o.status === 'confirmed').length})
+              </button>
+              <button
+                onClick={() => setMobileStatusTab('preparing')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
+                  mobileStatusTab === 'preparing'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'bg-white text-stone-700 border border-emerald-100 hover:bg-emerald-50'
+                }`}
+              >
+                In Kitchen ({orders.filter((o) => o.status === 'preparing').length})
+              </button>
+              <button
+                onClick={() => setMobileStatusTab('ready')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
+                  mobileStatusTab === 'ready'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-white text-stone-700 border border-emerald-100 hover:bg-emerald-50'
+                }`}
+              >
+                Ready & Out ({orders.filter((o) => o.status === 'ready' || o.status === 'out_for_delivery').length})
+              </button>
+              <button
+                onClick={() => setMobileStatusTab('delivered')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
+                  mobileStatusTab === 'delivered'
+                    ? 'bg-emerald-700 text-white shadow-xs'
+                    : 'bg-white text-stone-700 border border-emerald-100 hover:bg-emerald-50'
+                }`}
+              >
+                Completed ({completedOrders.length})
+              </button>
+              <button
+                onClick={() => setMobileStatusTab('cancelled')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
+                  mobileStatusTab === 'cancelled'
+                    ? 'bg-rose-700 text-white shadow-xs'
+                    : 'bg-white text-stone-700 border border-emerald-100 hover:bg-emerald-50'
+                }`}
+              >
+                Cancelled ({orders.filter((o) => o.status === 'cancelled').length})
+              </button>
             </div>
 
             {/* Kanban Columns - Responsive 5 Columns */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
               
               {/* Column 1: New / Confirmed */}
-              <div className="bg-white rounded-2xl border border-emerald-100 p-4 flex flex-col shadow-2xs">
+              <div className={`bg-white rounded-2xl border border-emerald-100 p-3.5 sm:p-4 flex flex-col shadow-2xs ${
+                mobileStatusTab !== 'all' && mobileStatusTab !== 'new' ? 'hidden xl:flex' : 'flex'
+              }`}>
                 <div className="flex items-center justify-between pb-3 mb-3 border-b border-emerald-100">
                   <span className="font-bold text-xs uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5" />
@@ -744,7 +877,9 @@ export const AdminDashboard: React.FC = () => {
               </div>
 
               {/* Column 2: In Kitchen Preparing */}
-              <div className="bg-white rounded-2xl border border-emerald-100 p-4 flex flex-col shadow-2xs">
+              <div className={`bg-white rounded-2xl border border-emerald-100 p-3.5 sm:p-4 flex flex-col shadow-2xs ${
+                mobileStatusTab !== 'all' && mobileStatusTab !== 'preparing' ? 'hidden xl:flex' : 'flex'
+              }`}>
                 <div className="flex items-center justify-between pb-3 mb-3 border-b border-emerald-100">
                   <span className="font-bold text-xs uppercase tracking-wider text-amber-800 flex items-center gap-1.5">
                     <Package className="w-3.5 h-3.5" />
@@ -772,7 +907,9 @@ export const AdminDashboard: React.FC = () => {
               </div>
 
               {/* Column 3: Ready / Out for Delivery */}
-              <div className="bg-white rounded-2xl border border-emerald-100 p-4 flex flex-col shadow-2xs">
+              <div className={`bg-white rounded-2xl border border-emerald-100 p-3.5 sm:p-4 flex flex-col shadow-2xs ${
+                mobileStatusTab !== 'all' && mobileStatusTab !== 'ready' ? 'hidden xl:flex' : 'flex'
+              }`}>
                 <div className="flex items-center justify-between pb-3 mb-3 border-b border-emerald-100">
                   <span className="font-bold text-xs uppercase tracking-wider text-blue-800 flex items-center gap-1.5">
                     <CheckCircle2 className="w-3.5 h-3.5" />
@@ -804,7 +941,9 @@ export const AdminDashboard: React.FC = () => {
               </div>
 
               {/* Column 4: Delivered / Completed */}
-              <div className="bg-white rounded-2xl border border-emerald-100 p-4 flex flex-col shadow-2xs">
+              <div className={`bg-white rounded-2xl border border-emerald-100 p-3.5 sm:p-4 flex flex-col shadow-2xs ${
+                mobileStatusTab !== 'all' && mobileStatusTab !== 'delivered' ? 'hidden xl:flex' : 'flex'
+              }`}>
                 <div className="flex items-center justify-between pb-3 mb-3 border-b border-emerald-100">
                   <span className="font-bold text-xs uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
                     <CheckCircle2 className="w-3.5 h-3.5" />
@@ -830,7 +969,9 @@ export const AdminDashboard: React.FC = () => {
               </div>
 
               {/* Column 5: Cancelled Orders */}
-              <div className="bg-white rounded-2xl border border-rose-200 p-4 flex flex-col shadow-2xs">
+              <div className={`bg-white rounded-2xl border border-rose-200 p-3.5 sm:p-4 flex flex-col shadow-2xs ${
+                mobileStatusTab !== 'all' && mobileStatusTab !== 'cancelled' ? 'hidden xl:flex' : 'flex'
+              }`}>
                 <div className="flex items-center justify-between pb-3 mb-3 border-b border-rose-100">
                   <span className="font-bold text-xs uppercase tracking-wider text-rose-800 flex items-center gap-1.5">
                     <XCircle className="w-3.5 h-3.5 text-rose-600" />
@@ -892,7 +1033,7 @@ export const AdminDashboard: React.FC = () => {
             {/* Products Table */}
             <div className="bg-white rounded-3xl border border-emerald-100 overflow-hidden shadow-xs">
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-stone-700">
+                <table className="w-full text-left text-xs text-stone-700 min-w-[640px]">
                   <thead className="bg-emerald-50/70 text-emerald-950 uppercase font-bold border-b border-emerald-100">
                     <tr>
                       <th className="p-3.5">Product</th>
@@ -1164,17 +1305,46 @@ export const AdminDashboard: React.FC = () => {
         {/* TAB 4: DELIVERY ZONES CONFIGURATION */}
         {activeTab === 'zones' && (
           <div className="space-y-6">
-            <div>
-              <h2 className="font-serif text-2xl font-bold text-emerald-950">
-                Delivery Zones & Fee Settings
-              </h2>
-              <p className="text-xs text-stone-600">
-                Configure fixed rates to prevent customer confusion or unexpected fees in Dharamkot.
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="font-serif text-2xl font-bold text-emerald-950">
+                  Delivery Zones & Fee Settings
+                </h2>
+                <p className="text-xs text-stone-600">
+                  Configure fixed rates to prevent customer confusion or unexpected fees in Dharamkot.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSaveZonesSubmit}
+                disabled={isSavingZones}
+                className="px-4 py-2.5 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                <Check className="w-4 h-4" />
+                <span>{isSavingZones ? 'Saving to Database...' : 'Save Delivery Zones to Database'}</span>
+              </button>
             </div>
 
+            {zonesFeedback && (
+              <div
+                className={`p-3.5 rounded-2xl text-xs flex items-center gap-2 ${
+                  zonesFeedback.type === 'success'
+                    ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                    : 'bg-rose-50 border border-rose-200 text-rose-800'
+                }`}
+              >
+                {zonesFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                )}
+                <span className="font-medium">{zonesFeedback.message}</span>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {deliveryZones.map((zone) => (
+              {zonesForm.map((zone, idx) => (
                 <div
                   key={zone.id}
                   className="bg-white rounded-3xl border border-emerald-100 p-6 shadow-xs space-y-4"
@@ -1198,10 +1368,13 @@ export const AdminDashboard: React.FC = () => {
                       <input
                         type="number"
                         value={zone.fee}
-                        onChange={(e) =>
-                          updateDeliveryZone({ ...zone, fee: Number(e.target.value) })
-                        }
-                        className="w-full text-xs px-3 py-2 border border-emerald-200 rounded-xl bg-emerald-50/40 text-emerald-950 focus:outline-none focus:border-emerald-600"
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          setZonesForm((prev) =>
+                            prev.map((z, i) => (i === idx ? { ...z, fee: val } : z))
+                          );
+                        }}
+                        className="w-full text-xs px-3 py-2 border border-emerald-200 rounded-xl bg-emerald-50/40 text-emerald-950 focus:outline-none focus:border-emerald-600 font-bold"
                       />
                     </div>
 
@@ -1212,13 +1385,17 @@ export const AdminDashboard: React.FC = () => {
                       <input
                         type="number"
                         value={zone.freeDeliveryThreshold || 0}
-                        onChange={(e) =>
-                          updateDeliveryZone({
-                            ...zone,
-                            freeDeliveryThreshold: Number(e.target.value) || undefined,
-                          })
-                        }
-                        className="w-full text-xs px-3 py-2 border border-emerald-200 rounded-xl bg-emerald-50/40 text-emerald-950 focus:outline-none focus:border-emerald-600"
+                        onChange={(e) => {
+                          const val = Number(e.target.value) || undefined;
+                          setZonesForm((prev) =>
+                            prev.map((z, i) =>
+                              i === idx
+                                ? { ...z, freeDeliveryThreshold: val, freeAbove: val }
+                                : z
+                            )
+                          );
+                        }}
+                        className="w-full text-xs px-3 py-2 border border-emerald-200 rounded-xl bg-emerald-50/40 text-emerald-950 focus:outline-none focus:border-emerald-600 font-bold"
                       />
                     </div>
                   </div>
@@ -1286,9 +1463,9 @@ export const AdminDashboard: React.FC = () => {
                 <div className="space-y-3 divide-y divide-emerald-100">
                   {issues.map((iss) => (
                     <div key={iss.id} className="pt-3 first:pt-0 space-y-2">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <div className="flex items-center gap-2">
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
                             <span className="font-bold text-sm text-emerald-950">
                               {iss.customerName} ({iss.customerPhone})
                             </span>
@@ -1302,7 +1479,7 @@ export const AdminDashboard: React.FC = () => {
                         </div>
 
                         <span
-                          className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
+                          className={`text-xs font-bold px-2.5 py-0.5 rounded-full shrink-0 self-start sm:self-auto ${
                             iss.status === 'open'
                               ? 'bg-rose-100 text-rose-800'
                               : 'bg-emerald-100 text-emerald-800'
@@ -1351,95 +1528,281 @@ export const AdminDashboard: React.FC = () => {
 
         {/* TAB 6: BUSINESS & STORE SETTINGS */}
         {activeTab === 'settings' && (
-          <div className="max-w-2xl bg-white rounded-3xl border border-emerald-100 p-6 sm:p-8 shadow-xs space-y-6">
-            <div>
-              <h2 className="font-serif text-2xl font-bold text-emerald-950">
-                Storefront & Operational Settings
-              </h2>
-              <p className="text-xs text-stone-600">
-                Manage public contact info, UPI configuration, and opening hours.
-              </p>
+          <div className="max-w-3xl bg-white rounded-3xl border border-emerald-100 p-6 sm:p-8 shadow-xs space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-emerald-100">
+              <div>
+                <h2 className="font-serif text-2xl font-bold text-emerald-950">
+                  Storefront &amp; Operational Settings
+                </h2>
+                <p className="text-xs text-stone-600">
+                  Manage bakery contact details, UPI payment IDs, address, and live operational parameters. Changes persist to database and sync across all devices.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSaveSettingsSubmit}
+                disabled={isSavingSettings}
+                className="px-4 py-2.5 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-xs cursor-pointer disabled:opacity-50 shrink-0 self-start sm:self-auto"
+              >
+                <Check className="w-4 h-4" />
+                <span>{isSavingSettings ? 'Saving to Database...' : 'Save Settings to Database'}</span>
+              </button>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900 mb-1">
-                  Official Phone Number
-                </label>
-                <input
-                  type="text"
-                  value={businessSettings.phone}
-                  onChange={(e) =>
-                    updateBusinessSettings({ ...businessSettings, phone: e.target.value })
-                  }
-                  className="w-full text-xs px-3 py-2 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
-                />
+            {settingsFeedback && (
+              <div
+                className={`p-3.5 rounded-2xl text-xs flex items-center gap-2 ${
+                  settingsFeedback.type === 'success'
+                    ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                    : 'bg-rose-50 border border-rose-200 text-rose-800'
+                }`}
+              >
+                {settingsFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                )}
+                <span className="font-medium">{settingsFeedback.message}</span>
               </div>
+            )}
 
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900 mb-1">
-                  WhatsApp Number (with country code, no +)
-                </label>
-                <input
-                  type="text"
-                  value={businessSettings.whatsapp}
-                  onChange={(e) =>
-                    updateBusinessSettings({ ...businessSettings, whatsapp: e.target.value })
-                  }
-                  className="w-full text-xs px-3 py-2 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900 mb-1">
-                  UPI VPA Handle (for payments)
-                </label>
-                <input
-                  type="text"
-                  value={businessSettings.upiId}
-                  onChange={(e) =>
-                    updateBusinessSettings({ ...businessSettings, upiId: e.target.value })
-                  }
-                  className="w-full text-xs px-3 py-2 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
+            <form onSubmit={handleSaveSettingsSubmit} className="space-y-5 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                  <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                    Bakery / Store Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={settingsForm.name}
+                    onChange={(e) =>
+                      setSettingsForm((prev) => ({ ...prev, name: e.target.value }))
+                    }
+                    className="w-full px-3 py-2.5 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600 font-semibold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                    Official Phone Number
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={settingsForm.phone}
+                    onChange={(e) =>
+                      setSettingsForm((prev) => ({ ...prev, phone: e.target.value }))
+                    }
+                    className="w-full px-3 py-2.5 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600 font-semibold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                    WhatsApp Number (with country code, no +)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={settingsForm.whatsapp}
+                    onChange={(e) =>
+                      setSettingsForm((prev) => ({ ...prev, whatsapp: e.target.value }))
+                    }
+                    className="w-full px-3 py-2.5 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600 font-semibold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                    UPI VPA ID (for QR &amp; In-App Payments)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={settingsForm.upiId}
+                    onChange={(e) =>
+                      setSettingsForm((prev) => ({ ...prev, upiId: e.target.value }))
+                    }
+                    className="w-full px-3 py-2.5 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600 font-semibold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                    UPI Merchant Name
+                  </label>
+                  <input
+                    type="text"
+                    value={settingsForm.upiMerchantName || ''}
+                    onChange={(e) =>
+                      setSettingsForm((prev) => ({ ...prev, upiMerchantName: e.target.value }))
+                    }
+                    className="w-full px-3 py-2.5 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                    Weekly Off Day
+                  </label>
+                  <input
+                    type="text"
+                    value={settingsForm.weeklyOff || ''}
+                    onChange={(e) =>
+                      setSettingsForm((prev) => ({ ...prev, weeklyOff: e.target.value }))
+                    }
+                    className="w-full px-3 py-2.5 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
+                    placeholder="e.g. None (Open All 7 Days)"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                    Store Address
+                  </label>
+                  <input
+                    type="text"
+                    value={settingsForm.address || ''}
+                    onChange={(e) =>
+                      setSettingsForm((prev) => ({ ...prev, address: e.target.value }))
+                    }
+                    className="w-full px-3 py-2.5 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                    Landmark / City
+                  </label>
+                  <input
+                    type="text"
+                    value={settingsForm.landmark || ''}
+                    onChange={(e) =>
+                      setSettingsForm((prev) => ({ ...prev, landmark: e.target.value }))
+                    }
+                    className="w-full px-3 py-2.5 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div>
+                  <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
                     Opening Time
                   </label>
                   <input
                     type="time"
-                    value={businessSettings.openingTime}
+                    value={settingsForm.openingTime}
                     onChange={(e) =>
-                      updateBusinessSettings({
-                        ...businessSettings,
-                        openingTime: e.target.value,
-                      })
+                      setSettingsForm((prev) => ({ ...prev, openingTime: e.target.value }))
                     }
-                    className="w-full text-xs px-3 py-2 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
+                    className="w-full px-3 py-2 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600 font-semibold"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                  <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
                     Closing Time
                   </label>
                   <input
                     type="time"
-                    value={businessSettings.closingTime}
+                    value={settingsForm.closingTime}
                     onChange={(e) =>
-                      updateBusinessSettings({
-                        ...businessSettings,
-                        closingTime: e.target.value,
-                      })
+                      setSettingsForm((prev) => ({ ...prev, closingTime: e.target.value }))
                     }
-                    className="w-full text-xs px-3 py-2 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
+                    className="w-full px-3 py-2 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600 font-semibold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                    Prep Time (Mins)
+                  </label>
+                  <input
+                    type="number"
+                    value={settingsForm.defaultPrepMinutes || 25}
+                    onChange={(e) =>
+                      setSettingsForm((prev) => ({ ...prev, defaultPrepMinutes: Number(e.target.value) || 20 }))
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600 font-semibold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                    Orders / Slot
+                  </label>
+                  <input
+                    type="number"
+                    value={settingsForm.maxOrdersPerSlot || 6}
+                    onChange={(e) =>
+                      setSettingsForm((prev) => ({ ...prev, maxOrdersPerSlot: Number(e.target.value) || 6 }))
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600 font-semibold"
                   />
                 </div>
               </div>
-            </div>
+
+              <div>
+                <label className="block font-bold uppercase tracking-wider text-emerald-900 mb-1">
+                  Public Announcement Banner Text
+                </label>
+                <input
+                  type="text"
+                  value={settingsForm.announcementText || ''}
+                  onChange={(e) =>
+                    setSettingsForm((prev) => ({ ...prev, announcementText: e.target.value }))
+                  }
+                  className="w-full px-3 py-2.5 rounded-xl border border-emerald-200 bg-white text-emerald-950 focus:outline-none focus:border-emerald-600"
+                  placeholder="e.g. Freshly Baked Custom Cakes & Gourmet Bistro Treats Ready in Dharamkot!"
+                />
+              </div>
+
+              <div className="flex flex-wrap gap-4 pt-2">
+                <label className="flex items-center gap-2 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settingsForm.isOpenManual}
+                    onChange={(e) =>
+                      setSettingsForm((prev) => ({ ...prev, isOpenManual: e.target.checked }))
+                    }
+                    className="w-4 h-4 text-emerald-700 rounded border-stone-300 focus:ring-emerald-600"
+                  />
+                  <span className="font-semibold text-emerald-950">Store is Open for Ordering (Manual Override)</span>
+                </label>
+
+                <label className="flex items-center gap-2 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settingsForm.showAnnouncement}
+                    onChange={(e) =>
+                      setSettingsForm((prev) => ({ ...prev, showAnnouncement: e.target.checked }))
+                    }
+                    className="w-4 h-4 text-emerald-700 rounded border-stone-300 focus:ring-emerald-600"
+                  />
+                  <span className="font-semibold text-emerald-950">Show Announcement Bar on Storefront</span>
+                </label>
+              </div>
+
+              <div className="pt-3 border-t border-emerald-100 flex justify-end">
+                <button
+                  type="submit"
+                  disabled={isSavingSettings}
+                  className="px-6 py-2.5 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-xs cursor-pointer disabled:opacity-50"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{isSavingSettings ? 'Saving to Database...' : 'Save All Settings to Database'}</span>
+                </button>
+              </div>
+            </form>
 
             {/* Private Portal Security Information */}
             <div className="bg-white p-6 rounded-3xl border border-emerald-100 shadow-xs">
@@ -2080,16 +2443,16 @@ const OrderCard: React.FC<OrderCardProps> = ({
 }) => {
   return (
     <div className="bg-white rounded-2xl border border-emerald-100 p-3.5 shadow-xs space-y-2.5 text-xs">
-      <div className="flex items-start justify-between">
-        <div>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
           <span className="font-mono font-bold text-emerald-800 text-sm">
             #{order.orderNumber}
           </span>
-          <div className="font-bold text-emerald-950">{order.customerName}</div>
-          <div className="text-[11px] text-stone-500">{order.customerPhone}</div>
+          <div className="font-bold text-emerald-950 truncate">{order.customerName}</div>
+          <div className="text-[11px] text-stone-500 truncate">{order.customerPhone}</div>
         </div>
 
-        <div className="text-right">
+        <div className="text-right shrink-0">
           <span className="font-bold text-sm text-emerald-950">₹{order.total}</span>
           <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded font-bold uppercase block mt-0.5">
             {order.orderType}
@@ -2165,7 +2528,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
         <select
           value={order.status}
           onChange={(e) => onUpdateStatus(e.target.value as OrderStatus)}
-          className="text-[11px] p-1.5 rounded-lg border border-emerald-200 bg-emerald-50/50 font-semibold text-emerald-950 focus:outline-none focus:border-emerald-600 cursor-pointer"
+          className="text-[11px] p-1.5 rounded-lg border border-emerald-200 bg-emerald-50/50 font-semibold text-emerald-950 focus:outline-none focus:border-emerald-600 cursor-pointer flex-1 min-w-[100px]"
         >
           <option value="new">New</option>
           <option value="confirmed">Confirmed</option>

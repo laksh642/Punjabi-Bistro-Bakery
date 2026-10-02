@@ -29,7 +29,7 @@ export const StorefrontPage: React.FC = () => {
       <Navbar />
 
       {/* Main Content */}
-      <main className="flex-1">
+      <main className="flex-1 pb-16 lg:pb-0">
         {/* Playful, Modern Food-Related Animations & Showcase (Pizza, Burger, Cakes) */}
         <FoodAnimationHero />
 

@@ -189,8 +189,8 @@ export const AdminCouponManager: React.FC = () => {
               <div>
                 {/* Top Row: Code Badge & Active Switch */}
                 <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="px-3 py-1 rounded-lg bg-emerald-950 text-amber-300 font-mono font-bold text-xs tracking-wider border border-emerald-800">
+                  <div className="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
+                    <span className="px-2.5 py-1 rounded-lg bg-emerald-950 text-amber-300 font-mono font-bold text-xs tracking-wider border border-emerald-800">
                       {coupon.code}
                     </span>
                     {coupon.badge && (

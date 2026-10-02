@@ -61,23 +61,23 @@ export const ReviewsSection: React.FC = () => {
           </div>
 
           {/* Rating Badge */}
-          <div className="bg-emerald-50/50 border border-emerald-100 p-4 rounded-2xl flex items-center gap-4 self-start lg:self-auto">
+          <div className="bg-emerald-50/50 border border-emerald-100 p-4 rounded-2xl flex flex-wrap sm:flex-nowrap items-center gap-3 sm:gap-4 self-start lg:self-auto w-full sm:w-auto">
             <div className="text-3xl font-serif font-black text-emerald-850">
               4.4
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-1 text-amber-500">
                 {[1, 2, 3, 4, 5].map((s) => (
                   <Star key={s} className="w-4 h-4 fill-amber-500 text-amber-500" />
                 ))}
               </div>
-              <div className="text-xs font-medium text-emerald-950 mt-0.5">
+              <div className="text-xs font-medium text-emerald-950 mt-0.5 truncate">
                 Based on 170+ Google Reviews
               </div>
             </div>
             <button
               onClick={() => setShowReviewForm(!showReviewForm)}
-              className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer ml-2"
+              className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer ml-auto sm:ml-2"
             >
               Write Review
             </button>

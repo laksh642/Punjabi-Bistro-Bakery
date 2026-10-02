@@ -109,12 +109,11 @@ export const CategoryCircleNav: React.FC = () => {
                 key={cat.id}
                 id={`circle-cat-${cat.id}`}
                 onClick={() => handleCategoryClick(cat.id)}
-                className="group flex flex-col items-center flex-shrink-0 focus:outline-none cursor-pointer transition-all duration-300"
-                style={{ width: '82px' }}
+                className="group flex flex-col items-center flex-shrink-0 focus:outline-none cursor-pointer transition-all duration-300 w-20 sm:w-22"
               >
                 {/* Circular Thumbnail Container */}
                 <div
-                  className={`relative w-18 h-18 sm:w-20 sm:h-20 rounded-full p-1 transition-all duration-300 ${
+                  className={`relative w-16 h-16 sm:w-20 sm:h-20 rounded-full p-1 transition-all duration-300 ${
                     isSelected
                       ? 'ring-3 ring-emerald-600 ring-offset-2 scale-105 shadow-md bg-emerald-100'
                       : 'hover:ring-2 hover:ring-emerald-300 group-hover:scale-105 bg-stone-100'
@@ -141,9 +140,10 @@ export const CategoryCircleNav: React.FC = () => {
 
                 {/* Category Label & Item Count */}
                 <span
-                  className={`mt-2 text-xs font-bold text-center leading-tight line-clamp-1 transition-colors ${
+                  className={`mt-2 text-[11px] sm:text-xs font-bold text-center leading-tight truncate max-w-[76px] sm:max-w-[84px] transition-colors ${
                     isSelected ? 'text-emerald-700 font-extrabold' : 'text-emerald-950 group-hover:text-emerald-700'
                   }`}
+                  title={cat.name}
                 >
                   {cat.name}
                 </span>

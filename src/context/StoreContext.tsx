@@ -45,6 +45,12 @@ import {
   fetchProductsFromCloud,
   saveProductToCloud,
   deleteProductFromCloud,
+  fetchBusinessSettingsFromCloud,
+  saveBusinessSettingsToCloud,
+  fetchDeliveryZonesFromCloud,
+  saveDeliveryZonesToCloud,
+  fetchCategoriesFromCloud,
+  saveCategoriesToCloud,
   ConnectionStatus,
   supabase,
   isSupabaseConfigured,
@@ -140,8 +146,12 @@ interface StoreContextType {
   // Delivery & Settings
   deliveryZones: DeliveryZone[];
   updateDeliveryZone: (zone: DeliveryZone) => void;
+  saveAllDeliveryZones: (zones: DeliveryZone[]) => Promise<boolean>;
   businessSettings: BusinessSettings;
-  updateBusinessSettings: (settings: BusinessSettings) => void;
+  updateBusinessSettings: (settings: BusinessSettings) => Promise<boolean>;
+  loadSettingsFromCloud: () => Promise<BusinessSettings>;
+  loadProductsFromCloud: () => Promise<Product[]>;
+  loadZonesFromCloud: () => Promise<DeliveryZone[]>;
   isStoreOpen: boolean;
 
   // Dynamic Coupons Management (Owner-Controlled)
@@ -237,6 +247,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // ignore
     }
     return INITIAL_PRODUCTS;
+  });
+
+  const [categories, setCategories] = useState<typeof INITIAL_CATEGORIES>(() => {
+    try {
+      const saved = localStorage.getItem('pb_categories');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return INITIAL_CATEGORIES;
   });
 
   const [cart, setCart] = useState<CartItem[]>(() => {
@@ -453,18 +474,79 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return orders;
   };
 
-  // Cloud Synchronization Function - storefront syncs products and public reviews only
+  // ============================================================================
+  // Authoritative Backend & Cloud Synchronization Loaders
+  // ============================================================================
+  const loadProductsFromCloud = async (): Promise<Product[]> => {
+    try {
+      const cloudProds = await fetchProductsFromCloud();
+      if (cloudProds && Array.isArray(cloudProds) && cloudProds.length > 0) {
+        setProducts(cloudProds);
+        try {
+          localStorage.setItem('pb_products', JSON.stringify(cloudProds));
+        } catch {}
+        return cloudProds;
+      }
+    } catch (err) {
+      console.warn('loadProductsFromCloud notice:', err);
+    }
+    return products;
+  };
+
+  const loadSettingsFromCloud = async (): Promise<BusinessSettings> => {
+    try {
+      const cloudSettings = await fetchBusinessSettingsFromCloud();
+      if (cloudSettings) {
+        setBusinessSettings(cloudSettings);
+        try {
+          localStorage.setItem('pb_business_settings', JSON.stringify(cloudSettings));
+        } catch {}
+        return cloudSettings;
+      }
+    } catch (err) {
+      console.warn('loadSettingsFromCloud notice:', err);
+    }
+    return businessSettings;
+  };
+
+  const loadZonesFromCloud = async (): Promise<DeliveryZone[]> => {
+    try {
+      const cloudZones = await fetchDeliveryZonesFromCloud();
+      if (cloudZones && Array.isArray(cloudZones) && cloudZones.length > 0) {
+        setDeliveryZones(cloudZones);
+        try {
+          localStorage.setItem('pb_delivery_zones', JSON.stringify(cloudZones));
+        } catch {}
+        return cloudZones;
+      }
+    } catch (err) {
+      console.warn('loadZonesFromCloud notice:', err);
+    }
+    return deliveryZones;
+  };
+
+  const loadCategoriesFromCloud = async (): Promise<typeof INITIAL_CATEGORIES> => {
+    try {
+      const cloudCats = await fetchCategoriesFromCloud();
+      if (cloudCats && Array.isArray(cloudCats) && cloudCats.length > 0) {
+        setCategories(cloudCats as any);
+        try {
+          localStorage.setItem('pb_categories', JSON.stringify(cloudCats));
+        } catch {}
+        return cloudCats as any;
+      }
+    } catch {}
+    return categories;
+  };
+
+  // Full Cloud & Backend Synchronization Function
   const syncWithCloud = async () => {
-    if (!isSupabaseConfigured) return;
     setIsCloudSyncing(true);
     try {
-      const status = await testSupabaseConnection();
-      setSupabaseStatus(status);
-
-      if (status.connected) {
-        // 1. Sync customer reviews (public)
-        if (status.tablesStatus.reviews) {
-          const cloudReviews = await fetchReviewsFromCloud();
+      if (isSupabaseConfigured) {
+        testSupabaseConnection().then(setSupabaseStatus).catch(() => {});
+        // Public reviews sync
+        fetchReviewsFromCloud().then((cloudReviews) => {
           if (cloudReviews && cloudReviews.length > 0) {
             setReviews((prev) => {
               const map = new Map<string, ReviewItem>();
@@ -473,23 +555,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               return Array.from(map.values());
             });
           }
-        }
-
-        // 2. Sync products from Supabase cloud (public menu)
-        if (status.tablesStatus.products) {
-          const cloudProducts = await fetchProductsFromCloud();
-          if (cloudProducts && cloudProducts.length > 0) {
-            setProducts((prev) => {
-              const map = new Map<string, Product>();
-              prev.forEach((p) => map.set(p.id, p));
-              cloudProducts.forEach((p) => map.set(p.id, p));
-              return Array.from(map.values());
-            });
-          }
-        }
+        }).catch(() => {});
       }
+
+      // Synchronize all authoritative business data across devices
+      await Promise.allSettled([
+        loadProductsFromCloud(),
+        loadSettingsFromCloud(),
+        loadZonesFromCloud(),
+        loadCategoriesFromCloud(),
+        loadCouponsFromCloud(),
+        loadIssuesFromCloud(),
+      ]);
     } catch (err) {
-      console.warn('Sync with cloud error:', err);
+      console.warn('Sync with cloud notice:', err);
     } finally {
       setIsCloudSyncing(false);
     }
@@ -628,14 +707,34 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return currentMinsTotal >= openMinsTotal && currentMinsTotal <= closeMinsTotal;
   }, [businessSettings]);
 
+  // Synchronize cart items with authoritative database product prices
+  const authoritativeCart = React.useMemo(() => {
+    return cart.map((item) => {
+      const liveProduct = products.find((p) => p.id === item.productId);
+      if (!liveProduct) return item;
+      const optionsTotal = (item.selectedOptions || []).reduce(
+        (sum, opt) => sum + (Number(opt.price) || 0),
+        0
+      );
+      const unitPrice = liveProduct.price + optionsTotal;
+      const totalPrice = unitPrice * item.quantity;
+      return {
+        ...item,
+        product: liveProduct,
+        unitPrice,
+        totalPrice,
+      };
+    });
+  }, [cart, products]);
+
   // Cart Calculations
   const cartSubtotal = React.useMemo(() => {
-    return cart.reduce((sum, item) => sum + item.totalPrice, 0);
-  }, [cart]);
+    return authoritativeCart.reduce((sum, item) => sum + item.totalPrice, 0);
+  }, [authoritativeCart]);
 
   const cartItemCount = React.useMemo(() => {
-    return cart.reduce((sum, item) => sum + item.quantity, 0);
-  }, [cart]);
+    return authoritativeCart.reduce((sum, item) => sum + item.quantity, 0);
+  }, [authoritativeCart]);
 
   const addToCart = (
     product: Product,
@@ -778,6 +877,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     loadCouponsFromCloud();
     loadIssuesFromCloud();
+    loadProductsFromCloud();
+    loadSettingsFromCloud();
+    loadZonesFromCloud();
+    loadCategoriesFromCloud();
 
     // Cross-tab synchronization via storage & custom events
     const handleStorageChange = (e: StorageEvent) => {
@@ -791,6 +894,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         try {
           const parsed = JSON.parse(e.newValue);
           if (Array.isArray(parsed)) setIssues(parsed);
+        } catch {}
+      }
+      if (e.key === 'pb_business_settings' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && typeof parsed === 'object') setBusinessSettings(parsed);
+        } catch {}
+      }
+      if (e.key === 'pb_delivery_zones' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setDeliveryZones(parsed);
+        } catch {}
+      }
+      if (e.key === 'pb_products' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setProducts(parsed);
         } catch {}
       }
     };
@@ -813,21 +934,57 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     };
 
+    const handleCustomSettingsUpdate = (e: Event) => {
+      const custom = e as CustomEvent;
+      if (custom.detail && typeof custom.detail === 'object') {
+        setBusinessSettings(custom.detail);
+      } else {
+        loadSettingsFromCloud();
+      }
+    };
+
+    const handleCustomZonesUpdate = (e: Event) => {
+      const custom = e as CustomEvent;
+      if (custom.detail && Array.isArray(custom.detail)) {
+        setDeliveryZones(custom.detail);
+      } else {
+        loadZonesFromCloud();
+      }
+    };
+
+    const handleCustomProductsUpdate = (e: Event) => {
+      const custom = e as CustomEvent;
+      if (custom.detail && Array.isArray(custom.detail)) {
+        setProducts(custom.detail);
+      } else {
+        loadProductsFromCloud();
+      }
+    };
+
     window.addEventListener('storage', handleStorageChange);
     window.addEventListener('pb_coupons_updated', handleCustomCouponUpdate);
     window.addEventListener('pb_issues_updated', handleCustomIssueUpdate);
+    window.addEventListener('pb_business_settings_updated', handleCustomSettingsUpdate);
+    window.addEventListener('pb_zones_updated', handleCustomZonesUpdate);
+    window.addEventListener('pb_products_updated', handleCustomProductsUpdate);
 
-    // Refresh cloud coupons and complaints every 7 seconds for live sync
+    // Refresh cloud data every 6 seconds for live multi-device synchronization
     const interval = setInterval(() => {
+      loadProductsFromCloud();
+      loadSettingsFromCloud();
+      loadZonesFromCloud();
       loadCouponsFromCloud();
       loadIssuesFromCloud();
-    }, 7000);
+    }, 6000);
 
     return () => {
       clearInterval(interval);
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('pb_coupons_updated', handleCustomCouponUpdate);
       window.removeEventListener('pb_issues_updated', handleCustomIssueUpdate);
+      window.removeEventListener('pb_business_settings_updated', handleCustomSettingsUpdate);
+      window.removeEventListener('pb_zones_updated', handleCustomZonesUpdate);
+      window.removeEventListener('pb_products_updated', handleCustomProductsUpdate);
     };
   }, []);
 
@@ -898,15 +1055,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Product Admin Operations
   const updateProduct = (product: Product) => {
-    setProducts((prev) => prev.map((p) => (p.id === product.id ? product : p)));
+    setProducts((prev) => {
+      const next = prev.map((p) => (p.id === product.id ? product : p));
+      try {
+        localStorage.setItem('pb_products', JSON.stringify(next));
+        window.dispatchEvent(new CustomEvent('pb_products_updated', { detail: next }));
+      } catch {}
+      return next;
+    });
     saveProductToCloud(product).catch((err) => {
       console.warn('Supabase updateProduct sync warning:', err);
     });
   };
 
   const toggleProductAvailability = (productId: string) => {
-    setProducts((prev) =>
-      prev.map((p) => {
+    setProducts((prev) => {
+      const next = prev.map((p) => {
         if (p.id === productId) {
           const updated = { ...p, isAvailable: !p.isAvailable };
           saveProductToCloud(updated).catch((err) => {
@@ -915,8 +1079,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           return updated;
         }
         return p;
-      })
-    );
+      });
+      try {
+        localStorage.setItem('pb_products', JSON.stringify(next));
+        window.dispatchEvent(new CustomEvent('pb_products_updated', { detail: next }));
+      } catch {}
+      return next;
+    });
   };
 
   const addProduct = (productData: Omit<Product, 'id'>) => {
@@ -924,14 +1093,28 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       ...productData,
       id: `prod-${Date.now()}`,
     };
-    setProducts((prev) => [newProduct, ...prev]);
+    setProducts((prev) => {
+      const next = [newProduct, ...prev];
+      try {
+        localStorage.setItem('pb_products', JSON.stringify(next));
+        window.dispatchEvent(new CustomEvent('pb_products_updated', { detail: next }));
+      } catch {}
+      return next;
+    });
     saveProductToCloud(newProduct).catch((err) => {
       console.warn('Supabase addProduct sync warning:', err);
     });
   };
 
   const deleteProduct = (productId: string) => {
-    setProducts((prev) => prev.filter((p) => p.id !== productId));
+    setProducts((prev) => {
+      const next = prev.filter((p) => p.id !== productId);
+      try {
+        localStorage.setItem('pb_products', JSON.stringify(next));
+        window.dispatchEvent(new CustomEvent('pb_products_updated', { detail: next }));
+      } catch {}
+      return next;
+    });
     deleteProductFromCloud(productId).catch((err) => {
       console.warn('Supabase deleteProduct sync warning:', err);
     });
@@ -939,11 +1122,35 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Delivery & Settings Admin
   const updateDeliveryZone = (zone: DeliveryZone) => {
-    setDeliveryZones((prev) => prev.map((z) => (z.id === zone.id ? zone : z)));
+    setDeliveryZones((prev) => {
+      const next = prev.map((z) => (z.id === zone.id ? zone : z));
+      try {
+        localStorage.setItem('pb_delivery_zones', JSON.stringify(next));
+        window.dispatchEvent(new CustomEvent('pb_zones_updated', { detail: next }));
+      } catch {}
+      saveDeliveryZonesToCloud(next).catch((err) => {
+        console.warn('saveDeliveryZonesToCloud notice:', err);
+      });
+      return next;
+    });
   };
 
-  const updateBusinessSettings = (settings: BusinessSettings) => {
+  const saveAllDeliveryZones = async (zones: DeliveryZone[]): Promise<boolean> => {
+    setDeliveryZones(zones);
+    try {
+      localStorage.setItem('pb_delivery_zones', JSON.stringify(zones));
+      window.dispatchEvent(new CustomEvent('pb_zones_updated', { detail: zones }));
+    } catch {}
+    return await saveDeliveryZonesToCloud(zones);
+  };
+
+  const updateBusinessSettings = async (settings: BusinessSettings): Promise<boolean> => {
     setBusinessSettings(settings);
+    try {
+      localStorage.setItem('pb_business_settings', JSON.stringify(settings));
+      window.dispatchEvent(new CustomEvent('pb_business_settings_updated', { detail: settings }));
+    } catch {}
+    return await saveBusinessSettingsToCloud(settings);
   };
 
   // Orders
@@ -952,11 +1159,30 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   ): Promise<{ success: boolean; order?: Order; error?: string }> => {
     const finalUserId = orderData.userId || `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
+    // Ensure order items use authoritative prices from the active database
+    const authoritativeItems = (orderData.items || authoritativeCart).map((item) => {
+      const liveProduct = products.find((p) => p.id === item.productId);
+      if (!liveProduct) return item;
+      const optionsTotal = (item.selectedOptions || []).reduce(
+        (sum, opt) => sum + (Number(opt.price) || 0),
+        0
+      );
+      const unitPrice = liveProduct.price + optionsTotal;
+      const totalPrice = unitPrice * item.quantity;
+      return {
+        ...item,
+        product: liveProduct,
+        unitPrice,
+        totalPrice,
+      };
+    });
+
     const trackingToken = generateTrackingToken();
     const randomNum = Math.floor(1000 + Math.random() * 9000);
     const orderNumber = `PB-${randomNum}`;
     const newOrder: Order = {
       ...orderData,
+      items: authoritativeItems,
       userId: finalUserId,
       id: `ord-${Date.now()}`,
       orderNumber,
@@ -1312,8 +1538,12 @@ _Sent via Punjabi Bistro & Bakery Dharamkot Website_`;
 
         deliveryZones,
         updateDeliveryZone,
+        saveAllDeliveryZones,
         businessSettings,
         updateBusinessSettings,
+        loadSettingsFromCloud,
+        loadProductsFromCloud,
+        loadZonesFromCloud,
         isStoreOpen,
 
         coupons,

@@ -142,23 +142,23 @@ export const Navbar: React.FC = () => {
 
         {/* Main Navigation Bar */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-18">
+          <div className="flex items-center justify-between min-h-[4rem] py-2 sm:py-2.5">
             {/* Logo / Brand Name */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <button
                 id="header-brand-button"
                 onClick={() => scrollToSection('hero-section')}
-                className="text-left group flex items-center gap-3 focus:outline-none cursor-pointer"
+                className="text-left group flex items-center gap-2.5 sm:gap-3 focus:outline-none cursor-pointer min-w-0"
               >
                 <PunjabiBistroLogo
                   id="header-bistro-logo-img"
-                  className="w-12 h-12 sm:w-13 sm:h-13 group-hover:scale-105 transition-transform"
+                  className="w-10 h-10 sm:w-12 sm:h-12 group-hover:scale-105 transition-transform shrink-0"
                 />
-                <div>
-                  <h1 className="font-serif text-lg sm:text-xl font-bold tracking-tight text-[#0F2916] leading-tight group-hover:text-emerald-700 transition-colors">
+                <div className="min-w-0">
+                  <h1 className="font-serif text-base sm:text-lg lg:text-xl font-bold tracking-tight text-[#0F2916] leading-tight group-hover:text-emerald-700 transition-colors truncate">
                     Punjabi Bistro & Bakery
                   </h1>
-                  <p className="text-[11px] text-emerald-800 font-medium tracking-wide flex items-center gap-1">
+                  <p className="text-[10px] sm:text-[11px] text-emerald-800 font-medium tracking-wide flex items-center gap-1 mt-0.5">
                     <span>Dharamkot</span>
                     <span>•</span>
                     <span className="text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">100% Pure Eggless</span>

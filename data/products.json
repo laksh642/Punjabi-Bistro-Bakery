@@ -1,0 +1,543 @@
+[
+  {
+    "id": "prod-cake-1",
+    "name": "Eggless Black Forest Cake",
+    "categoryId": "cakes",
+    "categoryName": "Cakes & Pastries",
+    "description": "Classic rich chocolate sponge layered with whipped fresh cream, dark cherries, and chocolate shavings. 100% Eggless.",
+    "price": 350,
+    "originalPrice": 400,
+    "image": "https://images.unsplash.com/photo-1606890737304-57a1ca8a5b62?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isBestseller": true,
+    "isEggless": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 30,
+    "customizationGroups": [
+      {
+        "name": "Cake Weight",
+        "type": "single",
+        "options": [
+          {
+            "name": "0.5 Kg",
+            "price": 0
+          },
+          {
+            "name": "1.0 Kg",
+            "price": 320
+          },
+          {
+            "name": "1.5 Kg",
+            "price": 600
+          }
+        ]
+      },
+      {
+        "name": "Celebration Add-ons",
+        "type": "multiple",
+        "options": [
+          {
+            "name": "Birthday Candle & Knife Set",
+            "price": 20
+          },
+          {
+            "name": "Sparkler Candle",
+            "price": 40
+          },
+          {
+            "name": "Golden Birthday Tag",
+            "price": 30
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "prod-cake-2",
+    "name": "Belgian Chocolate Truffle Cake",
+    "categoryId": "cakes",
+    "categoryName": "Cakes & Pastries",
+    "description": "Silky smooth dark chocolate ganache draped over moist chocolate sponge. Decadent, glossy, and 100% eggless.",
+    "price": 450,
+    "originalPrice": 500,
+    "image": "https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isBestseller": true,
+    "isEggless": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 30,
+    "customizationGroups": [
+      {
+        "name": "Cake Weight",
+        "type": "single",
+        "options": [
+          {
+            "name": "0.5 Kg",
+            "price": 0
+          },
+          {
+            "name": "1.0 Kg",
+            "price": 400
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "prod-cake-3",
+    "name": "Fresh Pineapple Cream Cake",
+    "categoryId": "cakes",
+    "categoryName": "Cakes & Pastries",
+    "description": "Light vanilla sponge enriched with chopped juicy pineapples and whipped fresh dairy cream. Gentle and refreshing.",
+    "price": 320,
+    "image": "https://images.unsplash.com/photo-1565958011703-44f9829ba187?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isEggless": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 25,
+    "customizationGroups": [
+      {
+        "name": "Cake Weight",
+        "type": "single",
+        "options": [
+          {
+            "name": "0.5 Kg",
+            "price": 0
+          },
+          {
+            "name": "1.0 Kg",
+            "price": 300
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "prod-cake-4",
+    "name": "Red Velvet Cream Cheese Pastry",
+    "categoryId": "cakes",
+    "categoryName": "Cakes & Pastries",
+    "description": "Individual velvety crimson slice layered with creamy cheese frosting and red velvet crumb dusting.",
+    "price": 85,
+    "image": "https://images.unsplash.com/photo-1616031037011-0872951336c1?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isEggless": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 10
+  },
+  {
+    "id": "prod-cake-5",
+    "name": "Hot Choco Lava Cupcake",
+    "categoryId": "cakes",
+    "categoryName": "Cakes & Pastries",
+    "description": "Warm cocoa muffin with a molten chocolate core that flows with the first bite.",
+    "price": 70,
+    "image": "https://images.unsplash.com/photo-1606313564200-e75d5e30476c?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isBestseller": true,
+    "isEggless": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 15
+  },
+  {
+    "id": "prod-cake-6",
+    "name": "Artisan Butter Cookies Box (250g)",
+    "categoryId": "cakes",
+    "categoryName": "Cakes & Pastries",
+    "description": "Fresh bakery baked crisp butter cookies with a melt-in-mouth crumb. Perfect for chai time.",
+    "price": 130,
+    "image": "https://images.unsplash.com/photo-1499636136210-6f4ee915583e?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isEggless": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 5
+  },
+  {
+    "id": "prod-pasta-1",
+    "name": "Creamy White Sauce Penne Pasta",
+    "categoryId": "pasta",
+    "categoryName": "Pasta & Italian",
+    "description": "Signature bistro white sauce penne cooked with rich garlic cream, sweet corn, crunchy bell peppers, and oregano herbs.",
+    "price": 190,
+    "image": "https://images.unsplash.com/photo-1621996346565-e3d5d6281699?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isBestseller": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 20,
+    "customizationGroups": [
+      {
+        "name": "Cheese & Spice",
+        "type": "multiple",
+        "options": [
+          {
+            "name": "Extra Mozzarella Cheese",
+            "price": 40
+          },
+          {
+            "name": "Spicy Chilli Flakes Kick",
+            "price": 0
+          },
+          {
+            "name": "Garlic Bread Slices (2 pcs)",
+            "price": 45
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "prod-pasta-2",
+    "name": "Tangy Red Sauce Arrabiata Pasta",
+    "categoryId": "pasta",
+    "categoryName": "Pasta & Italian",
+    "description": "Spicy simmered Italian tomato sauce with crushed garlic, fresh basil hints, black olives, and bell peppers.",
+    "price": 180,
+    "image": "https://images.unsplash.com/photo-1551183053-bf91a1d81141?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isVegetarian": true,
+    "isSpicy": true,
+    "prepTimeMinutes": 20,
+    "customizationGroups": [
+      {
+        "name": "Add-ons",
+        "type": "multiple",
+        "options": [
+          {
+            "name": "Extra Cheese Topping",
+            "price": 40
+          },
+          {
+            "name": "Garlic Bread Slices (2 pcs)",
+            "price": 45
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "prod-pasta-3",
+    "name": "Pink Mixed Sauce Fusion Pasta",
+    "categoryId": "pasta",
+    "categoryName": "Pasta & Italian",
+    "description": "The best of both worlds: creamy bechamel combined with tangy pomodoro sauce, tossed with sweet corn and paneer cubes.",
+    "price": 210,
+    "image": "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isBestseller": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 20
+  },
+  {
+    "id": "prod-pasta-4",
+    "name": "Toasted Cheesy Garlic Bread (4 pcs)",
+    "categoryId": "pasta",
+    "categoryName": "Pasta & Italian",
+    "description": "Crisp fresh baguette slices brushed with fragrant garlic butter and topped with bubbling melted mozzarella cheese.",
+    "price": 120,
+    "image": "https://images.unsplash.com/photo-1619535860434-ba1d8fa12536?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 15
+  },
+  {
+    "id": "prod-pizza-1",
+    "name": "Punjabi Bistro Special Paneer Pizza",
+    "categoryId": "pizza",
+    "categoryName": "Handcrafted Pizza",
+    "description": "Hand-tossed crust with aromatic spiced pizza sauce, marinated soft paneer cubes, crisp onions, green capsicum, and 100% mozzarella.",
+    "price": 260,
+    "image": "https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isBestseller": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 25,
+    "customizationGroups": [
+      {
+        "name": "Crust & Cheese",
+        "type": "single",
+        "options": [
+          {
+            "name": "Regular Pan Crust (8 inch)",
+            "price": 0
+          },
+          {
+            "name": "Medium Pan Crust (10 inch)",
+            "price": 140
+          },
+          {
+            "name": "Cheese Burst Base (8 inch)",
+            "price": 60
+          }
+        ]
+      },
+      {
+        "name": "Extra Toppings",
+        "type": "multiple",
+        "options": [
+          {
+            "name": "Extra Paneer Cubes",
+            "price": 45
+          },
+          {
+            "name": "Extra Cheese",
+            "price": 50
+          },
+          {
+            "name": "Spicy Jalapeños",
+            "price": 30
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "prod-pizza-2",
+    "name": "Farmhouse Garden Pizza",
+    "categoryId": "pizza",
+    "categoryName": "Handcrafted Pizza",
+    "description": "Loaded with tender sweet corn, fresh mushrooms, diced capsicum, juicy tomatoes, and melted mozzarella.",
+    "price": 240,
+    "image": "https://images.unsplash.com/photo-1574071318508-1cdbab80d002?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 25,
+    "customizationGroups": [
+      {
+        "name": "Size",
+        "type": "single",
+        "options": [
+          {
+            "name": "Regular (8 inch)",
+            "price": 0
+          },
+          {
+            "name": "Medium (10 inch)",
+            "price": 130
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "prod-pizza-3",
+    "name": "Classic Margherita Pizza",
+    "categoryId": "pizza",
+    "categoryName": "Handcrafted Pizza",
+    "description": "Simple authentic delight with rich tomato basil sauce, double mozzarella cheese, and Italian oregano dusting.",
+    "price": 190,
+    "image": "https://images.unsplash.com/photo-1604382354936-07c5d9983bd3?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 20
+  },
+  {
+    "id": "prod-pizza-4",
+    "name": "Spicy Mexican Jalapeño Pizza",
+    "categoryId": "pizza",
+    "categoryName": "Handcrafted Pizza",
+    "description": "Fiery Mexican salsa spread, spicy jalapeños, sweet golden corn, red paprika, and stretchy melted cheese.",
+    "price": 250,
+    "image": "https://images.unsplash.com/photo-1593560708920-61dd98c46a4e?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isVegetarian": true,
+    "isSpicy": true,
+    "prepTimeMinutes": 25
+  },
+  {
+    "id": "prod-burger-1",
+    "name": "Crispy Veggie Crunch Burger",
+    "categoryId": "burgers",
+    "categoryName": "Burgers & Wraps",
+    "description": "Crispy spiced vegetable patty nestled between soft toasted sesame buns, crisp lettuce, tomato slices, and house burger spread.",
+    "price": 95,
+    "image": "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isBestseller": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 15,
+    "customizationGroups": [
+      {
+        "name": "Upgrades",
+        "type": "multiple",
+        "options": [
+          {
+            "name": "Add Cheese Slice",
+            "price": 25
+          },
+          {
+            "name": "Make It Double Patty",
+            "price": 40
+          },
+          {
+            "name": "Add Small Salted Fries",
+            "price": 45
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "prod-burger-2",
+    "name": "Spicy Paneer Tikka Burger",
+    "categoryId": "burgers",
+    "categoryName": "Burgers & Wraps",
+    "description": "Charred paneer slice marinated in roasted tandoori spices, topped with mint chutney mayo and onion rings.",
+    "price": 135,
+    "image": "https://images.unsplash.com/photo-1586190848861-99aa4a171e90?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isVegetarian": true,
+    "isSpicy": true,
+    "prepTimeMinutes": 15
+  },
+  {
+    "id": "prod-wrap-1",
+    "name": "Spicy Mexican Bean & Cheese Wrap",
+    "categoryId": "burgers",
+    "categoryName": "Burgers & Wraps",
+    "description": "Grilled whole wheat tortilla packed with Mexican spiced filling, fresh salsa, crunchy bell peppers, and chipotle cheese sauce.",
+    "price": 145,
+    "image": "https://images.unsplash.com/photo-1626700051175-6818013e1d4f?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isBestseller": true,
+    "isVegetarian": true,
+    "isSpicy": true,
+    "prepTimeMinutes": 15
+  },
+  {
+    "id": "prod-wrap-2",
+    "name": "Tandoori Paneer Roll Wrap",
+    "categoryId": "burgers",
+    "categoryName": "Burgers & Wraps",
+    "description": "Flaky warm paratha wrap stuffed with roasted paneer tikka, pickled sliced onions, and smoky Punjabi bistro dip.",
+    "price": 150,
+    "image": "https://images.unsplash.com/photo-1648787989447-06bdfd1891b0?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 15
+  },
+  {
+    "id": "prod-sand-1",
+    "name": "Jumbo Cheesy Grilled Sandwich",
+    "categoryId": "sandwiches",
+    "categoryName": "Grilled Sandwiches",
+    "description": "Triple-decker bread toasted golden-crisp on the grill with butter, stuffed with sliced vegetables, green chutney, and double cheese.",
+    "price": 130,
+    "image": "https://images.unsplash.com/photo-1528735602780-2552fd46c7af?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isBestseller": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 15
+  },
+  {
+    "id": "prod-sand-2",
+    "name": "Paneer Corn Club Sandwich",
+    "categoryId": "sandwiches",
+    "categoryName": "Grilled Sandwiches",
+    "description": "Wholesome grilled club sandwich packed with seasoned paneer bhurji, sweet golden corn, capsicum, and house bistro spread.",
+    "price": 145,
+    "image": "https://images.unsplash.com/photo-1553909489-cd47e0907980?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 15
+  },
+  {
+    "id": "prod-sand-3",
+    "name": "Coleslaw Mayo Cold Sandwich",
+    "categoryId": "sandwiches",
+    "categoryName": "Grilled Sandwiches",
+    "description": "Chilled sandwich filled with shredded crisp cabbage, carrots, sweet corn, and creamy eggless mayonnaise spread.",
+    "price": 90,
+    "image": "https://images.unsplash.com/photo-1481070414801-51fd732d7184?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isEggless": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 10
+  },
+  {
+    "id": "prod-fries-1",
+    "name": "Peri Peri Crinkle Cut Fries",
+    "categoryId": "fries",
+    "categoryName": "Fries & Quick Bites",
+    "description": "Deep-fried golden crinkle potatoes tossed in hot & tangy African peri peri spice blend. Served with bistro dip.",
+    "price": 95,
+    "image": "https://images.unsplash.com/photo-1573080496219-bb080dd4f877?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isBestseller": true,
+    "isVegetarian": true,
+    "isSpicy": true,
+    "prepTimeMinutes": 10
+  },
+  {
+    "id": "prod-fries-2",
+    "name": "Loaded Melted Cheese Fries",
+    "categoryId": "fries",
+    "categoryName": "Fries & Quick Bites",
+    "description": "Hot crisp fries drenched in molten cheddar cheese sauce and garnished with sliced spicy jalapeños.",
+    "price": 130,
+    "image": "https://images.unsplash.com/photo-1585109649139-366815a0d713?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 12
+  },
+  {
+    "id": "prod-fries-3",
+    "name": "Crispy Veg Nuggets (8 pcs)",
+    "categoryId": "fries",
+    "categoryName": "Fries & Quick Bites",
+    "description": "Crunchy battered vegetable bites with a savory herbal seasoning. Served with tomato salsa dip.",
+    "price": 90,
+    "image": "https://images.unsplash.com/photo-1562967914-608f82629710?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 12
+  },
+  {
+    "id": "prod-bev-1",
+    "name": "Chilled Fruit Beer (Non-Alcoholic)",
+    "categoryId": "beverages",
+    "categoryName": "Drinks & Fruit Beer",
+    "description": "Dharamkot’s beloved bubbly malted fruit beverage served ice-cold. Refreshing, sweet, and effervescent.",
+    "price": 60,
+    "image": "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isBestseller": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 5
+  },
+  {
+    "id": "prod-bev-2",
+    "name": "Classic Thick Cold Coffee",
+    "categoryId": "beverages",
+    "categoryName": "Drinks & Fruit Beer",
+    "description": "Blended creamy chilled coffee topped with chocolate syrup drizzle and a scoop of vanilla ice cream.",
+    "price": 110,
+    "image": "https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 5
+  },
+  {
+    "id": "prod-bev-3",
+    "name": "Fresh Lime Mint Soda (Sweet & Salt)",
+    "categoryId": "beverages",
+    "categoryName": "Drinks & Fruit Beer",
+    "description": "Zesty freshly squeezed lemon juice with garden mint leaves and sparkling soda.",
+    "price": 70,
+    "image": "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 5
+  },
+  {
+    "id": "prod-bev-4",
+    "name": "Hot Hazelnut Bistro Cappuccino",
+    "categoryId": "beverages",
+    "categoryName": "Drinks & Fruit Beer",
+    "description": "Freshly brewed espresso topped with velvety steamed milk foam and subtle hazelnut essence.",
+    "price": 80,
+    "image": "https://images.unsplash.com/photo-1534778101976-62847782c213?auto=format&fit=crop&w=700&q=80",
+    "isAvailable": true,
+    "isVegetarian": true,
+    "prepTimeMinutes": 5
+  }
+]

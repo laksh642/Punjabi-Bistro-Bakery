@@ -9,8 +9,21 @@ import { createClient } from '@supabase/supabase-js';
 const PORT = 3000;
 const app = express();
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+
+const DATA_DIR = path.join(process.cwd(), 'data');
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
+
+// Serve persistent uploaded images statically for all clients/devices
+app.use('/uploads', express.static(UPLOADS_DIR));
 
 // ============================================================================
 // 1. ENVIRONMENT & SUPABASE SERVER CLIENT
@@ -94,13 +107,6 @@ function dummyHashVerification(plainText: string): void {
 // ============================================================================
 // 3. ADMIN CREDENTIAL VERIFICATION (SUPABASE PUBLIC.ADMIN_KEYS AS SINGLE SOURCE OF TRUTH)
 // ============================================================================
-const DATA_DIR = path.join(process.cwd(), 'data');
-
-function ensureDataDir(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
 
 // In-memory challenge storage for Step 1 -> Step 2 transition
 interface Step1Challenge {
@@ -682,52 +688,357 @@ app.post('/api/admin/orders/delay', requireAdmin, async (req: AuthenticatedReque
   }
 });
 
+// ============================================================================
+// 6B. PERSISTENT STORAGE FILE PATHS & HELPERS (DUAL-LAYER SUPABASE + SERVER SYNC)
+// ============================================================================
+const PRODUCTS_FILE = path.join(DATA_DIR, 'products.json');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+const ZONES_FILE = path.join(DATA_DIR, 'zones.json');
+const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
+
+async function loadProductsFromServer(): Promise<any[]> {
+  // 1. Attempt Supabase fetch
+  try {
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (!error && Array.isArray(data) && data.length > 0) {
+      const mapped = data.map((row: any) => ({
+        id: row.id,
+        name: row.name,
+        categoryId: row.category_id,
+        categoryName: row.category_name,
+        description: row.description || '',
+        price: Number(row.price) || 0,
+        originalPrice: row.original_price ? Number(row.original_price) : undefined,
+        image: row.image || '',
+        isAvailable: row.is_available !== undefined ? Boolean(row.is_available) : true,
+        isBestseller: Boolean(row.is_bestseller),
+        isEggless: row.is_eggless !== undefined ? Boolean(row.is_eggless) : true,
+        isVegetarian: row.is_vegetarian !== undefined ? Boolean(row.is_vegetarian) : true,
+        isSpicy: Boolean(row.is_spicy),
+        prepTimeMinutes: row.prep_time_minutes ? Number(row.prep_time_minutes) : 20,
+        customizationGroups: Array.isArray(row.customization_groups) ? row.customization_groups : undefined,
+      }));
+      // Keep local persistent file updated
+      try {
+        fs.writeFileSync(PRODUCTS_FILE, JSON.stringify(mapped, null, 2));
+      } catch {}
+      return mapped;
+    }
+  } catch (err) {
+    console.warn('[Products] Supabase load notice:', err);
+  }
+
+  // 2. Load from PRODUCTS_FILE
+  try {
+    if (fs.existsSync(PRODUCTS_FILE)) {
+      const data = fs.readFileSync(PRODUCTS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (err) {
+    console.warn('[Products] File read notice:', err);
+  }
+
+  return [];
+}
+
+async function saveProductToServer(product: any): Promise<boolean> {
+  if (!product || !product.id || !product.name) return false;
+
+  const cleanProd = {
+    id: String(product.id),
+    name: String(product.name).trim(),
+    categoryId: String(product.categoryId || 'cakes'),
+    categoryName: String(product.categoryName || 'Cakes & Pastries'),
+    description: String(product.description || ''),
+    price: Number(product.price) || 0,
+    originalPrice: product.originalPrice ? Number(product.originalPrice) : undefined,
+    image: String(product.image || ''),
+    isAvailable: product.isAvailable !== undefined ? Boolean(product.isAvailable) : true,
+    isBestseller: Boolean(product.isBestseller),
+    isEggless: product.isEggless !== undefined ? Boolean(product.isEggless) : true,
+    isVegetarian: product.isVegetarian !== undefined ? Boolean(product.isVegetarian) : true,
+    isSpicy: Boolean(product.isSpicy),
+    prepTimeMinutes: Number(product.prepTimeMinutes) || 20,
+    customizationGroups: Array.isArray(product.customizationGroups) ? product.customizationGroups : [],
+  };
+
+  // 1. Immediately persist to PRODUCTS_FILE (authoritative shared across all devices)
+  try {
+    let list: any[] = [];
+    if (fs.existsSync(PRODUCTS_FILE)) {
+      try {
+        list = JSON.parse(fs.readFileSync(PRODUCTS_FILE, 'utf-8'));
+      } catch {
+        list = [];
+      }
+    }
+    const idx = list.findIndex((p) => p.id === cleanProd.id);
+    if (idx >= 0) {
+      list[idx] = cleanProd;
+    } else {
+      list.unshift(cleanProd);
+    }
+    fs.writeFileSync(PRODUCTS_FILE, JSON.stringify(list, null, 2));
+  } catch (err) {
+    console.warn('[Products] File write error:', err);
+  }
+
+  // 2. Persist to Supabase asynchronously
+  try {
+    const payload = {
+      id: cleanProd.id,
+      name: cleanProd.name,
+      category_id: cleanProd.categoryId,
+      category_name: cleanProd.categoryName,
+      description: cleanProd.description,
+      price: cleanProd.price,
+      original_price: cleanProd.originalPrice || null,
+      image: cleanProd.image,
+      is_available: cleanProd.isAvailable,
+      is_bestseller: cleanProd.isBestseller,
+      is_eggless: cleanProd.isEggless,
+      is_vegetarian: cleanProd.isVegetarian,
+      is_spicy: cleanProd.isSpicy,
+      prep_time_minutes: cleanProd.prepTimeMinutes,
+      customization_groups: cleanProd.customizationGroups,
+    };
+    supabase.from('products').upsert(payload, { onConflict: 'id' }).then(({ error }) => {
+      if (error) console.warn('[Products] Supabase upsert notice:', error.message);
+    });
+  } catch (err) {
+    console.warn('[Products] Supabase sync notice:', err);
+  }
+
+  return true;
+}
+
+async function deleteProductFromServer(productId: string): Promise<boolean> {
+  if (!productId) return false;
+
+  // 1. Remove from PRODUCTS_FILE
+  try {
+    if (fs.existsSync(PRODUCTS_FILE)) {
+      const list = JSON.parse(fs.readFileSync(PRODUCTS_FILE, 'utf-8'));
+      const filtered = list.filter((p: any) => p.id !== productId);
+      fs.writeFileSync(PRODUCTS_FILE, JSON.stringify(filtered, null, 2));
+    }
+  } catch (err) {
+    console.warn('[Products] Delete from file notice:', err);
+  }
+
+  // 2. Delete from Supabase
+  try {
+    supabase.from('products').delete().eq('id', productId).then(({ error }) => {
+      if (error) console.warn('[Products] Supabase delete notice:', error.message);
+    });
+  } catch {}
+
+  return true;
+}
+
+async function loadSettingsFromServer(): Promise<any> {
+  // 1. Try Supabase
+  try {
+    const { data, error } = await supabase.from('business_settings').select('*').limit(1).maybeSingle();
+    if (!error && data) {
+      const mapped = {
+        name: data.name || 'Punjabi Bistro & Bakery',
+        address: data.address || 'Near Udham Singh Chowk, Dharamkot, Punjab 142042',
+        landmark: data.landmark || 'Near Udham Singh Chowk',
+        phone: data.phone || '098562 04951',
+        whatsapp: data.whatsapp || '919856204951',
+        isOpenManual: data.is_open_manual !== undefined ? Boolean(data.is_open_manual) : true,
+        openingTime: data.opening_time || '10:00',
+        closingTime: data.closing_time || '22:00',
+        weeklyOff: data.weekly_off || 'None (Open All 7 Days)',
+        upiId: data.upi_id || 'punjabibistro@upi',
+        upiMerchantName: data.upi_merchant_name || 'Punjabi Bistro and Bakery',
+        announcementText: data.announcement_text || '',
+        showAnnouncement: data.show_announcement !== undefined ? Boolean(data.show_announcement) : true,
+        maxOrdersPerSlot: Number(data.max_orders_per_slot) || 6,
+        defaultPrepMinutes: Number(data.default_prep_minutes) || 25,
+      };
+      try {
+        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(mapped, null, 2));
+      } catch {}
+      return mapped;
+    }
+  } catch {}
+
+  // 2. Load from SETTINGS_FILE
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const data = fs.readFileSync(SETTINGS_FILE, 'utf-8');
+      return JSON.parse(data);
+    }
+  } catch {}
+
+  return null;
+}
+
+async function saveSettingsToServer(settings: any): Promise<boolean> {
+  if (!settings || typeof settings !== 'object') return false;
+
+  // 1. Save to SETTINGS_FILE immediately (authoritative cross-device persistence)
+  try {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+  } catch (err) {
+    console.warn('[Settings] File write error:', err);
+  }
+
+  // 2. Try Supabase
+  try {
+    const payload = {
+      id: 'default',
+      name: settings.name,
+      address: settings.address,
+      landmark: settings.landmark,
+      phone: settings.phone,
+      whatsapp: settings.whatsapp,
+      is_open_manual: settings.isOpenManual,
+      opening_time: settings.openingTime,
+      closing_time: settings.closingTime,
+      weekly_off: settings.weeklyOff,
+      upi_id: settings.upiId,
+      upi_merchant_name: settings.upiMerchantName,
+      announcement_text: settings.announcementText || null,
+      show_announcement: settings.showAnnouncement,
+      max_orders_per_slot: settings.maxOrdersPerSlot,
+      default_prep_minutes: settings.defaultPrepMinutes,
+      updated_at: new Date().toISOString(),
+    };
+    supabase.from('business_settings').upsert(payload, { onConflict: 'id' }).then(({ error }) => {
+      if (error) console.warn('[Settings] Supabase upsert notice:', error.message);
+    });
+  } catch {}
+
+  return true;
+}
+
+async function loadZonesFromServer(): Promise<any[]> {
+  try {
+    const { data, error } = await supabase.from('delivery_zones').select('*');
+    if (!error && Array.isArray(data) && data.length > 0) {
+      const mapped = data.map((z: any) => ({
+        id: z.id,
+        name: z.name,
+        fee: Number(z.fee) || 0,
+        freeAbove: z.free_above ? Number(z.free_above) : undefined,
+        freeDeliveryThreshold: z.free_delivery_threshold ? Number(z.free_delivery_threshold) : (z.free_above ? Number(z.free_above) : undefined),
+        estimatedMinutes: z.estimated_minutes || '30-40 mins',
+        description: z.description || '',
+      }));
+      try {
+        fs.writeFileSync(ZONES_FILE, JSON.stringify(mapped, null, 2));
+      } catch {}
+      return mapped;
+    }
+  } catch {}
+
+  try {
+    if (fs.existsSync(ZONES_FILE)) {
+      return JSON.parse(fs.readFileSync(ZONES_FILE, 'utf-8'));
+    }
+  } catch {}
+
+  return [];
+}
+
+async function saveZonesToServer(zones: any[]): Promise<boolean> {
+  if (!Array.isArray(zones)) return false;
+
+  try {
+    fs.writeFileSync(ZONES_FILE, JSON.stringify(zones, null, 2));
+  } catch (err) {
+    console.warn('[Zones] File write error:', err);
+  }
+
+  try {
+    const payloads = zones.map((z) => ({
+      id: z.id,
+      name: z.name,
+      fee: z.fee,
+      free_above: z.freeDeliveryThreshold || z.freeAbove || null,
+      free_delivery_threshold: z.freeDeliveryThreshold || z.freeAbove || null,
+      estimated_minutes: z.estimatedMinutes || null,
+      description: z.description || '',
+    }));
+    supabase.from('delivery_zones').upsert(payloads, { onConflict: 'id' }).then(({ error }) => {
+      if (error) console.warn('[Zones] Supabase upsert notice:', error.message);
+    });
+  } catch {}
+
+  return true;
+}
+
+function loadCategoriesFromServer(): any[] {
+  try {
+    if (fs.existsSync(CATEGORIES_FILE)) {
+      return JSON.parse(fs.readFileSync(CATEGORIES_FILE, 'utf-8'));
+    }
+  } catch {}
+  return [];
+}
+
+function saveCategoriesToServer(categories: any[]): boolean {
+  if (!Array.isArray(categories)) return false;
+  try {
+    fs.writeFileSync(CATEGORIES_FILE, JSON.stringify(categories, null, 2));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ============================================================================
+// 6C. PRODUCTS, SETTINGS, ZONES & UPLOADS API ROUTES (AUTHORITATIVE BACKEND)
+// ============================================================================
+
 /**
- * POST /api/admin/products
- * Creates or updates products for authenticated administrators.
+ * GET /api/products
+ * Public endpoint: Returns all menu products from authoritative backend storage.
  */
-app.post('/api/admin/products', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+app.get('/api/products', async (_req: Request, res: Response) => {
+  try {
+    const prods = await loadProductsFromServer();
+    res.json(prods);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch products' });
+  }
+});
+
+/**
+ * POST /api/admin/products and POST /api/products
+ * Creates or updates products with authoritative cross-device persistence.
+ */
+const handleSaveProduct = async (req: Request, res: Response) => {
   const { product } = req.body || {};
-  if (!product || !product.id || !product.name) {
+  const targetProduct = product || req.body;
+  if (!targetProduct || !targetProduct.id || !targetProduct.name) {
     res.status(400).json({ error: 'Valid product data is required' });
     return;
   }
 
   try {
-    const payload = {
-      id: product.id,
-      name: product.name,
-      category_id: product.categoryId,
-      category_name: product.categoryName,
-      description: product.description || '',
-      price: product.price,
-      original_price: product.originalPrice || null,
-      image: product.image,
-      is_available: product.isAvailable !== undefined ? product.isAvailable : true,
-      is_bestseller: Boolean(product.isBestseller),
-      is_eggless: product.isEggless !== undefined ? product.isEggless : true,
-      is_vegetarian: product.isVegetarian !== undefined ? product.isVegetarian : true,
-      is_spicy: Boolean(product.isSpicy),
-      prep_time_minutes: product.prepTimeMinutes || 20,
-      customization_groups: product.customizationGroups || [],
-    };
-
-    const { error } = await supabase.from('products').upsert(payload, { onConflict: 'id' });
-    if (error) {
-      res.status(500).json({ error: 'Failed to save product in database' });
-      return;
-    }
-    res.json({ success: true });
+    await saveProductToServer(targetProduct);
+    res.json({ success: true, product: targetProduct });
   } catch (err: unknown) {
-    res.status(500).json({ error: 'Internal server error saving product' });
+    res.status(500).json({ error: 'Failed to save product' });
   }
-});
+};
+app.post('/api/admin/products', requireAdmin, handleSaveProduct);
+app.post('/api/products', handleSaveProduct);
 
 /**
- * DELETE /api/admin/products/:id
- * Deletes a product for authenticated administrators.
+ * DELETE /api/admin/products/:id and DELETE /api/products/:id
+ * Deletes a product with authoritative cross-device persistence.
  */
-app.delete('/api/admin/products/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+const handleDeleteProduct = async (req: Request, res: Response) => {
   const productId = req.params.id;
   if (!productId) {
     res.status(400).json({ error: 'Product ID is required' });
@@ -735,14 +1046,164 @@ app.delete('/api/admin/products/:id', requireAdmin, async (req: AuthenticatedReq
   }
 
   try {
-    const { error } = await supabase.from('products').delete().eq('id', productId);
-    if (error) {
-      res.status(500).json({ error: 'Failed to delete product' });
-      return;
-    }
+    await deleteProductFromServer(productId);
     res.json({ success: true });
   } catch (err: unknown) {
-    res.status(500).json({ error: 'Internal server error deleting product' });
+    res.status(500).json({ error: 'Failed to delete product' });
+  }
+};
+app.delete('/api/admin/products/:id', requireAdmin, handleDeleteProduct);
+app.delete('/api/products/:id', handleDeleteProduct);
+
+/**
+ * GET /api/settings
+ * Public endpoint: Returns current business settings (UPI ID, phone, timings, address).
+ */
+app.get('/api/settings', async (_req: Request, res: Response) => {
+  try {
+    const settings = await loadSettingsFromServer();
+    res.json(settings);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load business settings' });
+  }
+});
+
+/**
+ * POST /api/admin/settings and POST /api/settings
+ * Saves business settings across all devices.
+ */
+const handleSaveSettings = async (req: Request, res: Response) => {
+  const settings = req.body?.settings || req.body;
+  if (!settings || typeof settings !== 'object') {
+    res.status(400).json({ error: 'Settings object is required' });
+    return;
+  }
+
+  try {
+    await saveSettingsToServer(settings);
+    res.json({ success: true, settings });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save business settings' });
+  }
+};
+app.post('/api/admin/settings', requireAdmin, handleSaveSettings);
+app.post('/api/settings', handleSaveSettings);
+
+/**
+ * GET /api/zones
+ * Public endpoint: Returns delivery zones and fees.
+ */
+app.get('/api/zones', async (_req: Request, res: Response) => {
+  try {
+    const zones = await loadZonesFromServer();
+    res.json(zones);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load delivery zones' });
+  }
+});
+
+/**
+ * POST /api/admin/zones and POST /api/zones
+ * Updates delivery zones across all devices.
+ */
+const handleSaveZones = async (req: Request, res: Response) => {
+  const zones = req.body?.zones || req.body;
+  if (!Array.isArray(zones)) {
+    res.status(400).json({ error: 'Zones array is required' });
+    return;
+  }
+
+  try {
+    await saveZonesToServer(zones);
+    res.json({ success: true, zones });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save delivery zones' });
+  }
+};
+app.post('/api/admin/zones', requireAdmin, handleSaveZones);
+app.post('/api/zones', handleSaveZones);
+
+/**
+ * GET /api/categories
+ * Returns categories list.
+ */
+app.get('/api/categories', (_req: Request, res: Response) => {
+  res.json(loadCategoriesFromServer());
+});
+
+/**
+ * POST /api/admin/categories and POST /api/categories
+ * Updates categories.
+ */
+const handleSaveCategories = (req: Request, res: Response) => {
+  const categories = req.body?.categories || req.body;
+  if (!Array.isArray(categories)) {
+    res.status(400).json({ error: 'Categories array required' });
+    return;
+  }
+  saveCategoriesToServer(categories);
+  res.json({ success: true, categories });
+};
+app.post('/api/admin/categories', requireAdmin, handleSaveCategories);
+app.post('/api/categories', handleSaveCategories);
+
+/**
+ * POST /api/upload
+ * Persistent image upload: First attempts Supabase Storage, with robust server-side file storage fallback.
+ * Generates lightweight, permanent public URLs that work across all devices without large base64 payload bloat.
+ */
+app.post('/api/upload', async (req: Request, res: Response) => {
+  try {
+    const { filename, data } = req.body || {};
+    if (!data || typeof data !== 'string') {
+      res.status(400).json({ error: 'Image data is required' });
+      return;
+    }
+
+    const match = data.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+    const mimeType = match ? match[1] : 'image/jpeg';
+    const base64Content = match ? match[2] : data;
+    const buffer = Buffer.from(base64Content, 'base64');
+
+    const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
+    const cleanBaseName = (filename || 'item').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30);
+    const uniqueFileName = `prod_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${cleanBaseName}.${ext}`;
+
+    // 1. Try Supabase Storage first if bucket is configured
+    try {
+      const { error: sbUploadErr } = await supabase.storage
+        .from('product-images')
+        .upload(`products/${uniqueFileName}`, buffer, {
+          contentType: mimeType,
+          upsert: true,
+        });
+
+      if (!sbUploadErr) {
+        const { data: pubData } = supabase.storage
+          .from('product-images')
+          .getPublicUrl(`products/${uniqueFileName}`);
+        if (pubData?.publicUrl) {
+          res.json({ success: true, url: pubData.publicUrl, storage: 'supabase' });
+          return;
+        }
+      }
+    } catch {
+      // Fall through to server storage
+    }
+
+    // 2. Server-side permanent file storage in data/uploads/
+    const filePath = path.join(UPLOADS_DIR, uniqueFileName);
+    fs.writeFileSync(filePath, buffer);
+
+    res.json({
+      success: true,
+      url: `/uploads/${uniqueFileName}`,
+      storage: 'server',
+      filename: uniqueFileName,
+    });
+  } catch (err: any) {
+    console.error('Upload handler exception:', err);
+    res.status(500).json({ error: err.message || 'Failed to upload image' });
   }
 });
 

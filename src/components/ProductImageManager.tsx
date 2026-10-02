@@ -56,31 +56,19 @@ export const ProductImageManager: React.FC<ProductImageManagerProps> = ({
     const localPreview = URL.createObjectURL(file);
     setPreviewUrl(localPreview);
 
-    // Upload to Supabase Storage
+    // Upload to Persistent Storage (Supabase Storage or Server Storage)
     setIsUploading(true);
     try {
       const result = await uploadProductImageToSupabase(file);
       if (result.error || !result.url) {
-        // Fallback: If Supabase Storage bucket is not ready in user's project,
-        // convert file to clean base64 data URL so changes still persist in database and preview
-        console.warn('Storage upload notice:', result.error);
-        
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64data = reader.result as string;
-          onImageChange(base64data);
-          setPreviewUrl(base64data);
-          setUploadSuccess(true);
-          setUploadError(`Saved directly! (Note: ${result.error})`);
-          setTimeout(() => setUploadSuccess(false), 3500);
-        };
-        reader.readAsDataURL(file);
+        setUploadError(result.error || 'Failed to upload image. Please check your network connection.');
       } else {
         // Storage upload succeeded!
         onImageChange(result.url);
         setPreviewUrl(result.url);
         setUrlInputValue(result.url);
         setUploadSuccess(true);
+        setUploadError(null);
         setTimeout(() => setUploadSuccess(false), 3500);
       }
     } catch (err: any) {

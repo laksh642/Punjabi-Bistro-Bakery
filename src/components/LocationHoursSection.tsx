@@ -42,10 +42,10 @@ export const LocationHoursSection: React.FC = () => {
           <div className="lg:col-span-6 bg-white rounded-3xl p-6 sm:p-8 border border-emerald-100 shadow-sm flex flex-col justify-between space-y-6">
             <div className="space-y-6">
               {/* Live Status Badge */}
-              <div className="flex items-center justify-between pb-4 border-b border-emerald-100">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-emerald-100">
                 <div className="flex items-center gap-2">
                   <span
-                    className={`w-3 h-3 rounded-full ${
+                    className={`w-3 h-3 rounded-full shrink-0 ${
                       isStoreOpen ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
                     }`}
                   />
@@ -53,7 +53,7 @@ export const LocationHoursSection: React.FC = () => {
                     {isStoreOpen ? 'Currently Open For Dine-In & Delivery' : 'Currently Closed'}
                   </span>
                 </div>
-                <span className="text-xs bg-emerald-50 text-emerald-800 px-3 py-1 rounded-full font-medium">
+                <span className="text-xs bg-emerald-50 text-emerald-800 px-3 py-1 rounded-full font-medium self-start sm:self-auto">
                   {businessSettings.openingDays}
                 </span>
               </div>

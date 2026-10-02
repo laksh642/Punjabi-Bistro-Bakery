@@ -318,33 +318,23 @@ export const FoodAnimationHero: React.FC = () => {
           })}
         </div>
 
-        {/* Dynamic Presentation Stage (Repeating Outlined/Solid Words + Bobbing Food) */}
-        <div className="relative min-h-[350px] sm:min-h-[420px] lg:min-h-[450px] flex items-center justify-center">
+        {/* Dynamic Presentation Stage (High-clarity, Non-overlapping Layout for Mobile, Tab & Laptop) */}
+        <div className="relative min-h-[340px] sm:min-h-[400px] lg:min-h-[440px] flex items-center justify-center">
           
           <AnimatePresence mode="wait">
             <motion.div
               key={currentSlide.id}
-              initial={{ opacity: 0, scale: 0.96 }}
+              initial={{ opacity: 0, scale: 0.97 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 1.04 }}
-              transition={{ duration: 0.45, ease: 'easeOut' }}
+              exit={{ opacity: 0, scale: 1.03 }}
+              transition={{ duration: 0.35, ease: 'easeOut' }}
               className="w-full relative flex flex-col items-center justify-center py-2"
             >
               
-              {/* Background Repeating Decorative Outline Words (Subtle Ambient Texture, Never Collides with Text) */}
-              <div className="absolute inset-0 flex flex-col items-center justify-start pt-2 pointer-events-none overflow-hidden z-0 select-none">
-                <div className="text-stroke-banner font-serif font-black text-5xl sm:text-7xl md:text-8xl lg:text-9xl tracking-widest uppercase opacity-[0.035] leading-none">
-                  {currentSlide.nameKey}
-                </div>
-                <div className="text-stroke-banner-emerald font-serif font-black text-4xl sm:text-6xl md:text-7xl lg:text-8xl tracking-widest uppercase opacity-[0.03] leading-none -mt-2 sm:-mt-4">
-                  {currentSlide.nameKey}
-                </div>
-              </div>
-
               {/* Main Food Showcase Grid: Mobile, Tablet (md), Laptop/Desktop (lg/xl) */}
               <div className="w-full grid grid-cols-1 md:grid-cols-12 gap-4 sm:gap-6 items-center z-20">
                 
-                {/* Left Floating Food Item (Bobbing smoothly) */}
+                {/* Left Floating Food Item (Bobbing smoothly on Tablet & Desktop) */}
                 <div className="hidden md:flex md:col-span-3 lg:col-span-4 flex-col items-center md:items-end justify-center">
                   <motion.div
                     initial={{ x: -40, opacity: 0, rotate: -8 }}
@@ -376,27 +366,29 @@ export const FoodAnimationHero: React.FC = () => {
                   </motion.div>
                 </div>
 
-                {/* Center Content Card (Crystal-Clear Contrast, Opaque Background, Zero Text Collision) */}
+                {/* Center Content Card (Crystal-Clear Contrast, Non-colliding Typography) */}
                 <div className="col-span-1 md:col-span-6 lg:col-span-4 px-2 sm:px-4 z-20">
-                  <div className="bg-[#072413] border border-emerald-500/40 rounded-3xl p-5 sm:p-6 lg:p-7 shadow-2xl text-center space-y-3.5 relative overflow-hidden">
+                  <div className="bg-[#072413] border border-emerald-500/40 rounded-3xl p-4 sm:p-6 lg:p-7 shadow-2xl text-center space-y-3 relative overflow-hidden">
                     {/* Subtle inner top glow */}
                     <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-emerald-500 via-amber-300 to-emerald-500 opacity-70" />
 
                     {/* Quality Pill */}
-                    <div className="inline-flex items-center gap-1.5 bg-emerald-900/90 border border-emerald-600/60 px-3 py-1 rounded-full text-[10px] sm:text-[11px] font-semibold text-emerald-200 shadow-sm">
+                    <div className="inline-flex items-center gap-1.5 bg-emerald-900/90 border border-emerald-600/60 px-3 py-1 rounded-full text-[10px] sm:text-[11px] font-semibold text-emerald-200 shadow-sm max-w-full">
                       <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                       <span className="truncate">{currentSlide.badge}</span>
                     </div>
 
-                    {/* Mobile Single Dish Preview */}
-                    <div className="md:hidden relative w-36 h-36 sm:w-40 sm:h-40 mx-auto rounded-full p-1 bg-gradient-to-tr from-amber-400/40 via-emerald-400/30 to-transparent shadow-xl my-1">
-                      <img
-                        src={currentSlide.leftItem.image}
-                        alt={currentSlide.leftItem.name}
-                        className="w-full h-full object-cover rounded-full border-2 border-emerald-400/60 shadow-lg animate-food-left"
-                      />
-                      <div className="absolute -bottom-2 inset-x-1 bg-emerald-950/95 border border-emerald-600 px-2 py-0.5 rounded-xl text-center shadow-lg">
-                        <span className="text-[11px] font-bold text-white block truncate">
+                    {/* Mobile Single Dish Preview (Static on mobile, clean spacing, never collides with text) */}
+                    <div className="md:hidden flex flex-col items-center justify-center my-1.5">
+                      <div className="relative w-28 h-28 sm:w-36 sm:h-36 rounded-full p-1 bg-gradient-to-tr from-amber-400/40 via-emerald-400/30 to-transparent shadow-xl">
+                        <img
+                          src={currentSlide.leftItem.image}
+                          alt={currentSlide.leftItem.name}
+                          className="w-full h-full object-cover rounded-full border-2 border-emerald-400/60 shadow-lg"
+                        />
+                      </div>
+                      <div className="mt-1.5 bg-emerald-950/95 border border-emerald-600/80 px-3 py-1 rounded-xl text-center shadow-md flex items-center gap-2">
+                        <span className="text-[11px] font-bold text-white truncate max-w-[150px]">
                           {currentSlide.leftItem.name}
                         </span>
                         <span className="text-xs font-black text-emerald-400">
@@ -405,24 +397,24 @@ export const FoodAnimationHero: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Title & Copy (High Contrast, Distinct Typographic Separation) */}
+                    {/* Title & Copy (High Contrast, Responsive Scaling for Phone, Tab, Laptop) */}
                     <div>
                       <h2
                         id="hero-feature-title"
-                        className="font-serif text-2xl sm:text-3xl lg:text-4xl font-bold text-white tracking-tight drop-shadow-md"
+                        className="font-serif text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold text-white tracking-tight leading-snug drop-shadow-md"
                       >
                         {currentSlide.title}
                       </h2>
-                      <p className="text-xs sm:text-sm text-emerald-100/90 max-w-sm mx-auto mt-2 leading-relaxed font-normal">
+                      <p className="text-xs sm:text-sm text-emerald-100/90 max-w-sm mx-auto mt-1.5 sm:mt-2 leading-relaxed font-normal">
                         {currentSlide.description}
                       </p>
                     </div>
 
                     {/* Action CTA */}
-                    <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2.5 sm:gap-3">
+                    <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3">
                       <button
                         onClick={() => handleSelectCategory(currentSlide.categoryId)}
-                        className="w-full sm:w-auto bg-gradient-to-r from-emerald-400 to-emerald-500 hover:from-emerald-300 hover:to-emerald-400 text-emerald-950 font-bold px-5 py-2.5 sm:px-6 sm:py-3 rounded-2xl shadow-lg hover:shadow-emerald-400/30 transition-all flex items-center justify-center gap-2 text-xs sm:text-sm cursor-pointer group"
+                        className="w-full sm:w-auto bg-gradient-to-r from-emerald-400 to-emerald-500 hover:from-emerald-300 hover:to-emerald-400 text-emerald-950 font-bold px-4 py-2.5 sm:px-6 sm:py-3 rounded-2xl shadow-lg hover:shadow-emerald-400/30 transition-all flex items-center justify-center gap-2 text-xs sm:text-sm cursor-pointer group"
                       >
                         <Utensils className="w-4 h-4" />
                         <span>Order Now</span>
@@ -438,7 +430,7 @@ export const FoodAnimationHero: React.FC = () => {
                     </div>
 
                     {/* Location & Quick Info */}
-                    <div className="pt-1 flex items-center justify-center gap-2.5 text-[11px] text-emerald-300/80 font-medium">
+                    <div className="pt-1 flex items-center justify-center gap-2 text-[10px] sm:text-[11px] text-emerald-300/80 font-medium">
                       <span>📍 Dharamkot, Punjab</span>
                       <span>•</span>
                       <span>🕒 10 AM – 10 PM</span>

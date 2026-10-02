@@ -1,0 +1,17 @@
+{
+  "name": "Punjabi Bistro & Bakery",
+  "address": "Near Udham Singh Chowk, Dharamkot, Punjab 142042",
+  "landmark": "Near Udham Singh Chowk",
+  "phone": "098562 04951",
+  "whatsapp": "919856204951",
+  "isOpenManual": true,
+  "openingTime": "10:00",
+  "closingTime": "22:00",
+  "weeklyOff": "None (Open All 7 Days)",
+  "upiId": "punjabibistro@upi",
+  "upiMerchantName": "Punjabi Bistro and Bakery",
+  "announcementText": "Fresh batch of eggless cakes and pizza ready today! Book before 9:30 PM for same-day delivery.",
+  "showAnnouncement": true,
+  "maxOrdersPerSlot": 6,
+  "defaultPrepMinutes": 25
+}
