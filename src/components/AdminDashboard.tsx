@@ -36,12 +36,14 @@ import {
   ShieldCheck,
   Volume2,
   VolumeX,
+  Upload,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { useAdminAuth } from '../context/AdminAuthContext';
 import { Order, OrderStatus, Product, CustomCakeEnquiry, DeliveryZone } from '../types';
 import { PunjabiBistroLogo } from './PunjabiBistroLogo';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured, uploadProductImageToSupabase } from '../lib/supabase';
 import { ProductImageManager } from './ProductImageManager';
 import { AdminCouponManager } from './AdminCouponManager';
 
@@ -145,6 +147,108 @@ export const AdminDashboard: React.FC = () => {
       });
     } finally {
       setIsSavingZones(false);
+    }
+  };
+
+  // Authoritative Store Open/Closed Master Switch Handler
+  const [isTogglingStore, setIsTogglingStore] = useState(false);
+  const [storeStatusToast, setStoreStatusToast] = useState<string | null>(null);
+
+  const handleToggleStoreStatus = async () => {
+    if (isTogglingStore) return;
+    const nextStatus = !businessSettings.isOpenManual;
+    setIsTogglingStore(true);
+    try {
+      const updated = {
+        ...businessSettings,
+        isOpenManual: nextStatus,
+      };
+      setSettingsForm(updated);
+      await updateBusinessSettings(updated);
+      setStoreStatusToast(
+        nextStatus
+          ? '✓ Store is now OPEN (Accepting Orders)'
+          : '✓ Store is now CLOSED (Live Orders Paused)'
+      );
+      setTimeout(() => setStoreStatusToast(null), 3500);
+    } catch (err: any) {
+      console.error('Error toggling store status:', err);
+    } finally {
+      setIsTogglingStore(false);
+    }
+  };
+
+  // Website Brand Logo Cloud Persistence & Management State
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
+  const [logoUploadSuccess, setLogoUploadSuccess] = useState<string | null>(null);
+  const [logoUrlInput, setLogoUrlInput] = useState('');
+  const logoFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleLogoFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingLogo(true);
+    setLogoUploadError(null);
+    setLogoUploadSuccess(null);
+
+    try {
+      const result = await uploadProductImageToSupabase(file);
+      if (result.error || !result.url) {
+        setLogoUploadError(result.error || 'Failed to upload logo image to storage.');
+      } else {
+        const updated = {
+          ...businessSettings,
+          logoUrl: result.url,
+        };
+        setSettingsForm(updated);
+        await updateBusinessSettings(updated);
+        setLogoUploadSuccess('✓ Website logo uploaded and saved to database successfully!');
+        setTimeout(() => setLogoUploadSuccess(null), 4000);
+      }
+    } catch (err: any) {
+      setLogoUploadError(err.message || 'Failed to upload logo. Please try again.');
+    } finally {
+      setIsUploadingLogo(false);
+      if (logoFileInputRef.current) logoFileInputRef.current.value = '';
+    }
+  };
+
+  const handleApplyLogoUrl = async () => {
+    if (!logoUrlInput.trim()) return;
+    setLogoUploadError(null);
+    setLogoUploadSuccess(null);
+    const cleanUrl = logoUrlInput.trim();
+    const updated = {
+      ...businessSettings,
+      logoUrl: cleanUrl,
+    };
+    setSettingsForm(updated);
+    const ok = await updateBusinessSettings(updated);
+    if (ok) {
+      setLogoUploadSuccess('✓ Website logo URL saved to database & synchronized across site!');
+      setLogoUrlInput('');
+      setTimeout(() => setLogoUploadSuccess(null), 4000);
+    } else {
+      setLogoUploadError('Failed to save logo URL. Please try again.');
+    }
+  };
+
+  const handleRemoveLogo = async () => {
+    setLogoUploadError(null);
+    setLogoUploadSuccess(null);
+    const updated = {
+      ...businessSettings,
+      logoUrl: '',
+    };
+    setSettingsForm(updated);
+    const ok = await updateBusinessSettings(updated);
+    if (ok) {
+      setLogoUploadSuccess('✓ Website logo removed from database and storefront.');
+      setTimeout(() => setLogoUploadSuccess(null), 4000);
+    } else {
+      setLogoUploadError('Failed to remove logo. Please try again.');
     }
   };
 
@@ -374,6 +478,8 @@ export const AdminDashboard: React.FC = () => {
   const [editProdEggless, setEditProdEggless] = useState(true);
   const [editProdBestseller, setEditProdBestseller] = useState(false);
   const [editProdAvailable, setEditProdAvailable] = useState(true);
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
+  const [productFeedbackToast, setProductFeedbackToast] = useState<string | null>(null);
 
   const startEditProduct = (p: Product) => {
     setEditingProduct(p);
@@ -387,16 +493,17 @@ export const AdminDashboard: React.FC = () => {
     setEditProdAvailable(p.isAvailable);
   };
 
-  const handleUpdateProductSubmit = (e: React.FormEvent) => {
+  const handleUpdateProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingProduct || !editProdName.trim()) return;
 
+    setIsSavingProduct(true);
     const catObj = categories.find((c) => c.id === editProdCat);
     const updated: Product = {
       ...editingProduct,
       name: editProdName.trim(),
       description: editProdDesc.trim(),
-      price: Number(editProdPrice),
+      price: Math.max(0, Number(editProdPrice) || 0),
       categoryId: editProdCat,
       categoryName: catObj ? catObj.name : editingProduct.categoryName,
       image: editProdImage.trim() || editingProduct.image,
@@ -405,8 +512,16 @@ export const AdminDashboard: React.FC = () => {
       isBestseller: editProdBestseller,
     };
 
-    updateProduct(updated);
-    setEditingProduct(null);
+    try {
+      updateProduct(updated);
+      setProductFeedbackToast(`✓ "${updated.name}" updated in database and synchronized across live menu!`);
+      setTimeout(() => setProductFeedbackToast(null), 4500);
+      setEditingProduct(null);
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setIsSavingProduct(false);
+    }
   };
 
   // Cake Quotation State
@@ -570,22 +685,31 @@ export const AdminDashboard: React.FC = () => {
                 <span className="hidden sm:inline">{isCloudSyncing ? 'Syncing...' : 'Sync'}</span>
               </button>
 
-              {/* Manual Open / Close quick toggle */}
+              {/* Authoritative Manual Open / Close Master Switch Toggle */}
               <button
-                onClick={() =>
-                  updateBusinessSettings({
-                    ...businessSettings,
-                    isOpenManual: !businessSettings.isOpenManual,
-                  })
-                }
-                className={`flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full transition-all cursor-pointer ${
+                type="button"
+                onClick={handleToggleStoreStatus}
+                disabled={isTogglingStore}
+                title={`Click to switch bakery to ${businessSettings.isOpenManual ? 'CLOSED (Pause Orders)' : 'OPEN (Accept Orders)'}`}
+                className={`flex items-center gap-1.5 text-[11px] font-black px-3 py-1.5 rounded-full transition-all cursor-pointer shadow-xs disabled:opacity-50 select-none ${
                   businessSettings.isOpenManual
-                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                    : 'bg-rose-700 hover:bg-rose-600 text-white'
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white ring-2 ring-emerald-400/40'
+                    : 'bg-rose-600 hover:bg-rose-500 text-white ring-2 ring-rose-400/40'
                 }`}
               >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    businessSettings.isOpenManual ? 'bg-emerald-200 animate-pulse' : 'bg-rose-200'
+                  }`}
+                />
                 <Power className="w-3 h-3" />
-                <span>{businessSettings.isOpenManual ? 'OPEN' : 'CLOSED'}</span>
+                <span>
+                  {isTogglingStore
+                    ? 'UPDATING...'
+                    : businessSettings.isOpenManual
+                    ? 'STORE: OPEN'
+                    : 'STORE: CLOSED'}
+                </span>
               </button>
             </div>
           </div>
@@ -690,6 +814,42 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
       </header>
+
+      {/* Floating Store Status Notification Banner */}
+      {storeStatusToast && (
+        <div className="sticky top-24 z-40 max-w-md mx-auto px-4 mt-2 mb-2 animate-in slide-in-from-top-2 duration-200">
+          <div className="bg-emerald-950 text-white border-2 border-emerald-400 p-3 rounded-2xl shadow-2xl flex items-center justify-between gap-3 text-xs font-bold">
+            <div className="flex items-center gap-2">
+              <Power className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{storeStatusToast}</span>
+            </div>
+            <button
+              onClick={() => setStoreStatusToast(null)}
+              className="text-emerald-300 hover:text-white p-1 rounded-full cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Product Update Notification Banner */}
+      {productFeedbackToast && (
+        <div className="sticky top-24 z-40 max-w-md mx-auto px-4 mt-2 mb-2 animate-in slide-in-from-top-2 duration-200">
+          <div className="bg-emerald-900 text-white border-2 border-emerald-300 p-3 rounded-2xl shadow-2xl flex items-center justify-between gap-3 text-xs font-bold">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-amber-300 shrink-0" />
+              <span>{productFeedbackToast}</span>
+            </div>
+            <button
+              onClick={() => setProductFeedbackToast(null)}
+              className="text-emerald-300 hover:text-white p-1 rounded-full cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Content Area */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -1567,6 +1727,178 @@ export const AdminDashboard: React.FC = () => {
               </div>
             )}
 
+            {/* CARD 1: WEBSITE BRAND LOGO MANAGER (ADD / REMOVE ANYTIME, SAVED IN SUPABASE/DATABASE) */}
+            <div className="bg-emerald-50/60 rounded-3xl border border-emerald-200 p-6 space-y-4 shadow-2xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 bg-emerald-800 text-amber-300 rounded-2xl shadow-xs">
+                    <ImageIcon className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-serif font-bold text-base text-emerald-950">
+                      Website Brand Logo
+                    </h3>
+                    <p className="text-[11px] text-stone-600">
+                      Add, update, or remove the official logo displayed on the storefront navbar, footer, and customer modals. Saved in database storage.
+                    </p>
+                  </div>
+                </div>
+
+                {settingsForm.logoUrl && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveLogo}
+                    disabled={isUploadingLogo}
+                    className="px-3.5 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer self-start sm:self-auto disabled:opacity-50 border border-rose-300 shadow-2xs"
+                    title="Remove custom logo from website and database"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Remove Logo</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Logo Upload Status Notices */}
+              {logoUploadSuccess && (
+                <div className="p-3 bg-emerald-100/90 border border-emerald-300 text-emerald-900 rounded-xl text-xs flex items-center gap-2 animate-in fade-in">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                  <span className="font-semibold">{logoUploadSuccess}</span>
+                </div>
+              )}
+              {logoUploadError && (
+                <div className="p-3 bg-rose-100 border border-rose-300 text-rose-900 rounded-xl text-xs flex items-center gap-2 animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 text-rose-700 shrink-0" />
+                  <span className="font-semibold">{logoUploadError}</span>
+                </div>
+              )}
+
+              {/* Logo Preview & Controls Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-5 items-center pt-2">
+                {/* Visual Preview Box */}
+                <div className="sm:col-span-4 flex flex-col items-center justify-center p-4 bg-white rounded-2xl border border-emerald-100 text-center shadow-2xs">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-900 mb-2 block">
+                    Current Active Logo
+                  </span>
+                  <div className="p-2.5 bg-emerald-950 rounded-2xl shadow-inner flex items-center justify-center">
+                    <PunjabiBistroLogo className="w-16 h-16 sm:w-20 sm:h-20" />
+                  </div>
+                  <span className="text-[10px] text-stone-500 mt-2 font-mono truncate max-w-full">
+                    {settingsForm.logoUrl ? 'Custom Logo Active' : 'Default Brand Monogram'}
+                  </span>
+                </div>
+
+                {/* Upload & URL Controls Box */}
+                <div className="sm:col-span-8 space-y-3.5">
+                  <div>
+                    <label className="block text-[11px] font-bold text-emerald-900 uppercase tracking-wider mb-1">
+                      Upload Logo Image File (PNG, JPG, WEBP, SVG)
+                    </label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        ref={logoFileInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                        onChange={handleLogoFileSelect}
+                        className="hidden"
+                        id="logo-upload-input"
+                      />
+                      <label
+                        htmlFor="logo-upload-input"
+                        className={`px-4 py-2.5 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-xs cursor-pointer ${
+                          isUploadingLogo ? 'opacity-50 pointer-events-none' : ''
+                        }`}
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>{isUploadingLogo ? 'Uploading to Storage...' : 'Choose Logo File to Upload'}</span>
+                      </label>
+                      <span className="text-[11px] text-stone-500">
+                        Max 10MB • Saved to persistent cloud storage
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-emerald-200/60">
+                    <label className="block text-[11px] font-bold text-emerald-900 uppercase tracking-wider mb-1">
+                      Or Enter / Paste Logo URL
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="url"
+                        placeholder="https://example.com/logo.png"
+                        value={logoUrlInput}
+                        onChange={(e) => setLogoUrlInput(e.target.value)}
+                        className="flex-1 px-3.5 py-2 rounded-xl border border-emerald-200 bg-white text-xs text-emerald-950 focus:outline-none focus:border-emerald-600"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleApplyLogoUrl}
+                        disabled={!logoUrlInput.trim()}
+                        className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50 cursor-pointer shrink-0"
+                      >
+                        Apply URL
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* CARD 2: STORE OPEN / CLOSED MASTER CONTROLLER */}
+            <div className={`p-5 rounded-3xl border transition-all shadow-2xs ${
+              settingsForm.isOpenManual
+                ? 'bg-emerald-50/80 border-emerald-300'
+                : 'bg-rose-50/80 border-rose-300'
+            }`}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className={`p-3 rounded-2xl text-white shadow-xs ${
+                    settingsForm.isOpenManual ? 'bg-emerald-600' : 'bg-rose-600'
+                  }`}>
+                    <Power className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-serif font-bold text-base text-emerald-950">
+                        Store Ordering Status:
+                      </h3>
+                      <span className={`text-xs font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
+                        settingsForm.isOpenManual
+                          ? 'bg-emerald-200 text-emerald-900'
+                          : 'bg-rose-200 text-rose-900'
+                      }`}>
+                        {settingsForm.isOpenManual ? 'OPEN (Accepting Orders)' : 'CLOSED (Orders Paused)'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-stone-600 mt-0.5">
+                      {settingsForm.isOpenManual
+                        ? 'Customers can browse and place live delivery, pickup, or dine-in orders right now.'
+                        : 'Store is manually closed. Ordering is paused and the storefront banner displays "Currently Closed".'}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleToggleStoreStatus}
+                  disabled={isTogglingStore}
+                  className={`px-5 py-2.5 rounded-2xl text-xs font-black flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:opacity-50 shrink-0 ${
+                    settingsForm.isOpenManual
+                      ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                      : 'bg-emerald-700 hover:bg-emerald-600 text-white'
+                  }`}
+                >
+                  <Power className="w-4 h-4" />
+                  <span>
+                    {isTogglingStore
+                      ? 'Updating...'
+                      : settingsForm.isOpenManual
+                      ? 'Switch Store to CLOSED'
+                      : 'Switch Store to OPEN'}
+                  </span>
+                </button>
+              </div>
+            </div>
+
             <form onSubmit={handleSaveSettingsSubmit} className="space-y-5 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -2410,10 +2742,20 @@ export const AdminDashboard: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-emerald-800 text-white font-bold py-2.5 rounded-xl hover:bg-emerald-900 transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-2"
+                  disabled={isSavingProduct}
+                  className="flex-1 bg-emerald-800 text-white font-bold py-2.5 rounded-xl hover:bg-emerald-900 transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  <Check className="w-4 h-4" />
-                  <span>Save Changes & Sync to Menu</span>
+                  {isSavingProduct ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Saving to Database...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Save Changes & Sync to Menu</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

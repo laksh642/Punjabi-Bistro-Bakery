@@ -183,6 +183,7 @@ export interface CustomerFeedback {
 
 export interface BusinessSettings {
   name: string;
+  logoUrl?: string;
   address: string;
   landmark: string;
   phone: string;

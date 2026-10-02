@@ -527,6 +527,7 @@ export const INITIAL_DELIVERY_ZONES: DeliveryZone[] = [
 
 export const INITIAL_BUSINESS_SETTINGS: BusinessSettings = {
   name: 'Punjabi Bistro & Bakery',
+  logoUrl: '/logoo.png',
   address: 'Near Udham Singh Chowk, Dharamkot, Punjab 142042',
   landmark: 'Near Udham Singh Chowk',
   phone: '098562 04951',

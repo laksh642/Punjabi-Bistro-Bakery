@@ -62,9 +62,9 @@ export const Navbar: React.FC = () => {
         <div className="bg-[#0B2E15] text-emerald-100 text-xs py-1.5 px-4">
           <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1 text-amber-300 font-semibold">
-                <MapPin className="w-3.5 h-3.5" />
-                Near Udham Singh Chowk, Dharamkot
+              <span className="flex items-center gap-1 text-amber-300 font-semibold truncate max-w-[200px] sm:max-w-none">
+                <MapPin className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{businessSettings.landmark || businessSettings.address || 'Near Udham Singh Chowk, Dharamkot'}</span>
               </span>
               {/* Service Mode Toggle (Delivery, Pick-up, Dine-in) */}
               <div className="hidden sm:flex items-center bg-emerald-950/60 p-0.5 rounded-lg border border-emerald-700/60 text-[11px] font-semibold">
@@ -156,10 +156,10 @@ export const Navbar: React.FC = () => {
                 />
                 <div className="min-w-0">
                   <h1 className="font-serif text-base sm:text-lg lg:text-xl font-bold tracking-tight text-[#0F2916] leading-tight group-hover:text-emerald-700 transition-colors truncate">
-                    Punjabi Bistro & Bakery
+                    {businessSettings.name}
                   </h1>
                   <p className="text-[10px] sm:text-[11px] text-emerald-800 font-medium tracking-wide flex items-center gap-1 mt-0.5">
-                    <span>Dharamkot</span>
+                    <span>{businessSettings.landmark || 'Dharamkot'}</span>
                     <span>•</span>
                     <span className="text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">100% Pure Eggless</span>
                   </p>
@@ -410,6 +410,15 @@ export const Navbar: React.FC = () => {
                 Having an issue with an order? Get Help
               </button>
             </div>
+          </div>
+        )}
+        {/* Prominent Store Closed Notice Banner */}
+        {!isStoreOpen && (
+          <div className="bg-rose-700 text-white text-xs font-bold py-2 px-4 text-center shadow-inner flex items-center justify-center gap-2 border-t border-rose-800">
+            <span className="w-2 h-2 rounded-full bg-rose-200 animate-ping shrink-0" />
+            <span>
+              Bakery is Currently Closed for Online Orders • Kitchen reopens at {businessSettings.openingTime} • Call {businessSettings.phone} for inquiries
+            </span>
           </div>
         )}
       </header>

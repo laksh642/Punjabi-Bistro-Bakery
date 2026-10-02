@@ -11,7 +11,7 @@ interface ProductCardProps {
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenDetails }) => {
-  const { cart, addToCart, updateCartQuantity, favorites, toggleFavorite } = useStore();
+  const { cart, addToCart, updateCartQuantity, favorites, toggleFavorite, isStoreOpen, businessSettings } = useStore();
   const { user, openLoginModal } = useCustomerAuth();
   const [justAdded, setJustAdded] = useState(false);
 
@@ -23,6 +23,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenDetails
 
   const handleQuickAdd = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!isStoreOpen) return;
     if (!product.isAvailable) return;
 
     // If product has required customization options (like cake weight or pizza size), open details modal
@@ -176,7 +177,14 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenDetails
               )}
             </AnimatePresence>
 
-            {product.isAvailable ? (
+            {!isStoreOpen ? (
+              <span
+                className="bg-stone-100 text-stone-500 border border-stone-200 font-bold text-[11px] px-2.5 py-1.5 rounded-xl select-none cursor-not-allowed"
+                title={`Store is closed. Ordering resumes at ${businessSettings.openingTime}`}
+              >
+                Closed
+              </span>
+            ) : product.isAvailable ? (
               <AnimatePresence mode="wait">
                 {totalQtyInCart > 0 ? (
                   <motion.div

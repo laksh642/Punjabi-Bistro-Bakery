@@ -14,8 +14,11 @@ import { useStore } from '../context/StoreContext';
 export const LocationHoursSection: React.FC = () => {
   const { businessSettings, isStoreOpen } = useStore();
 
+  const fullAddress = businessSettings.address || 'Near Udham Singh Chowk, Dharamkot, Punjab 142042';
+  const landmarkText = businessSettings.landmark || 'Near Udham Singh Chowk';
+
   const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-    'Punjabi Bistro & Bakery Near Udham Singh Chowk Dharamkot Punjab 142042'
+    `${businessSettings.name} ${fullAddress}`
   )}`;
 
   return (
@@ -32,7 +35,7 @@ export const LocationHoursSection: React.FC = () => {
             Location, Hours & Directions
           </h2>
           <p className="text-sm text-emerald-800/80 mt-2">
-            Centrally located near Udham Singh Chowk in Dharamkot. Easy drive-through, dine-in parking, and prompt takeaway pickup.
+            Centrally located at {landmarkText}. Easy drive-through, dine-in parking, and prompt takeaway pickup.
           </p>
         </div>
 
@@ -50,11 +53,11 @@ export const LocationHoursSection: React.FC = () => {
                     }`}
                   />
                   <span className="font-bold text-sm text-[#0F2916]">
-                    {isStoreOpen ? 'Currently Open For Dine-In & Delivery' : 'Currently Closed'}
+                    {isStoreOpen ? 'Currently Open For Dine-In & Delivery' : 'Currently Closed (Orders Paused)'}
                   </span>
                 </div>
                 <span className="text-xs bg-emerald-50 text-emerald-800 px-3 py-1 rounded-full font-medium self-start sm:self-auto">
-                  {businessSettings.openingDays}
+                  {businessSettings.weeklyOff || 'Open All 7 Days'}
                 </span>
               </div>
 
@@ -65,14 +68,13 @@ export const LocationHoursSection: React.FC = () => {
                   <span>Physical Address</span>
                 </div>
                 <p className="text-base font-bold text-[#0F2916] leading-snug">
-                  Near Udham Singh Chowk, Dharamkot
+                  {fullAddress}
                 </p>
-                <p className="text-sm text-emerald-800/80">
-                  District Moga, Punjab — 142042, India
-                </p>
-                <p className="text-xs text-emerald-850/80 mt-1 italic">
-                  Landmark: Right by the Udham Singh Chowk roundabout, accessible directly from the main Dharamkot market road.
-                </p>
+                {businessSettings.landmark && (
+                  <p className="text-xs text-emerald-850/80 mt-1 italic">
+                    Landmark: {businessSettings.landmark}
+                  </p>
+                )}
               </div>
 
               {/* Hours Schedule */}
@@ -83,14 +85,14 @@ export const LocationHoursSection: React.FC = () => {
                 </div>
                 <div className="space-y-1.5 text-xs sm:text-sm text-emerald-950">
                   <div className="flex justify-between py-1 border-b border-emerald-50">
-                    <span className="font-medium">Monday – Sunday:</span>
+                    <span className="font-medium">Operating Hours:</span>
                     <span className="font-bold text-[#0F2916]">
                       {businessSettings.openingTime} – {businessSettings.closingTime}
                     </span>
                   </div>
                   <div className="flex justify-between py-1">
-                    <span className="font-medium">Kitchen Last Order:</span>
-                    <span className="font-semibold text-stone-600">09:30 PM</span>
+                    <span className="font-medium">Weekly Schedule:</span>
+                    <span className="font-semibold text-stone-600">{businessSettings.weeklyOff || 'Open All 7 Days'}</span>
                   </div>
                 </div>
               </div>
@@ -161,25 +163,25 @@ export const LocationHoursSection: React.FC = () => {
                 Visiting Dharamkot or Passing Through?
               </h3>
               <p className="text-xs sm:text-sm text-stone-600 leading-relaxed">
-                Whether you're travelling between Moga, Shahkot, or Jalandhar, or you're a local resident near Udham Singh Chowk, Punjabi Bistro is the easiest stop for freshly brewed coffee, hot cheesy pizza, and fresh cakes.
+                Whether you're travelling through Dharamkot or visiting from nearby areas, {businessSettings.name} at {landmarkText} is the easiest stop for freshly brewed coffee, hot cheesy pizza, and fresh cakes.
               </p>
             </div>
 
             {/* Visual Location Mockup Card */}
             <div className="relative rounded-2xl overflow-hidden aspect-[16/10] bg-stone-800 border border-emerald-100">
-              {/* Static visual representation of local street map near Udham Singh Chowk */}
+              {/* Static visual representation of local street map */}
               <img
                 src="https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?auto=format&fit=crop&w=800&q=80"
-                alt="Map overview of Dharamkot road"
+                alt="Map overview of location road"
                 className="w-full h-full object-cover opacity-60"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent flex flex-col justify-end p-5 text-white">
                 <div className="inline-flex items-center gap-1.5 bg-emerald-700 text-white px-3 py-1 rounded-full text-xs font-bold self-start mb-2">
                   <MapPin className="w-3.5 h-3.5" />
-                  <span>Punjabi Bistro & Bakery</span>
+                  <span>{businessSettings.name}</span>
                 </div>
                 <div className="font-bold text-sm">
-                  Near Udham Singh Chowk, Dharamkot (142042)
+                  {fullAddress}
                 </div>
                 <div className="text-xs text-stone-300 mt-0.5">
                   Drive-through pick up spot available in front of bistro.

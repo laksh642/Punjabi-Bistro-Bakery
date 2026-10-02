@@ -33,20 +33,20 @@ export const Footer: React.FC = () => {
                 <PunjabiBistroLogo className="w-12 h-12" />
                 <div>
                   <h3 className="font-serif text-lg font-bold text-white leading-tight">
-                    Punjabi Bistro & Bakery
+                    {businessSettings.name}
                   </h3>
-                  <p className="text-xs text-amber-400">Dharamkot, Punjab 142042</p>
+                  <p className="text-xs text-amber-400">{businessSettings.landmark || 'Dharamkot, Punjab'}</p>
                 </div>
               </div>
 
               <p className="text-xs text-emerald-100/75 leading-relaxed max-w-sm">
-                Near Udham Singh Chowk, Dharamkot. Handcrafting 100% pure eggless celebration cakes, fresh pizzas, creamy pasta, burgers, and comforting snacks for dine-in, takeaway, and same-day delivery.
+                {businessSettings.address}. Handcrafting 100% pure eggless celebration cakes, fresh pizzas, creamy pasta, burgers, and comforting snacks for dine-in, takeaway, and same-day delivery.
               </p>
 
               <div className="space-y-2 text-xs text-emerald-100/75">
                 <div className="flex items-start gap-2">
                   <MapPin className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                  <span>Near Udham Singh Chowk, Dharamkot, Punjab 142042</span>
+                  <span>{businessSettings.address}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Phone className="w-4 h-4 text-emerald-400 flex-shrink-0" />
@@ -59,7 +59,7 @@ export const Footer: React.FC = () => {
                 </div>
                 <div className="flex items-center gap-2">
                   <Clock className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                  <span>Daily: 10:00 AM – 10:00 PM</span>
+                  <span>Daily: {businessSettings.openingTime} – {businessSettings.closingTime}</span>
                 </div>
               </div>
             </div>
@@ -191,7 +191,7 @@ export const Footer: React.FC = () => {
           {/* Bottom Copyright Strip */}
           <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-emerald-200/60 text-center sm:text-left">
             <div>
-              © {new Date().getFullYear()} Punjabi Bistro & Bakery. All Rights Reserved. Near Udham Singh Chowk, Dharamkot.
+              © {new Date().getFullYear()} {businessSettings.name}. All Rights Reserved. {businessSettings.landmark || businessSettings.address}.
             </div>
             <div className="flex items-center gap-1 text-emerald-200/60">
               <span>Made with care for Dharamkot, Punjab</span>

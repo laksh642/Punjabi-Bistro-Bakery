@@ -103,11 +103,11 @@ export const Hero: React.FC = () => {
             <div className="pt-2 flex flex-wrap items-center gap-y-2 gap-x-5 text-xs text-emerald-900/70 border-t border-emerald-100">
               <span className="flex items-center gap-1.5">
                 <MapPin className="w-3.5 h-3.5 text-emerald-700" />
-                Near Udham Singh Chowk, Dharamkot
+                {businessSettings.landmark || businessSettings.address}
               </span>
               <span className="flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-emerald-700" />
-                Open daily 10:00 AM – 10:00 PM
+                Daily {businessSettings.openingTime} – {businessSettings.closingTime}
               </span>
               <a
                 href={`tel:${businessSettings.phone.replace(/\s+/g, '')}`}

@@ -1643,6 +1643,7 @@ export async function fetchBusinessSettingsFromCloud(): Promise<BusinessSettings
       if (data && typeof data === 'object' && data.name) {
         return {
           name: data.name,
+          logoUrl: data.logoUrl || data.logo_url || '',
           address: data.address || '',
           landmark: data.landmark || '',
           phone: data.phone || '',
@@ -1671,6 +1672,7 @@ export async function fetchBusinessSettingsFromCloud(): Promise<BusinessSettings
       if (!error && data) {
         return {
           name: data.name,
+          logoUrl: data.logo_url || data.logoUrl || '',
           address: data.address || '',
           landmark: data.landmark || '',
           phone: data.phone || '',
@@ -1730,6 +1732,7 @@ export async function saveBusinessSettingsToCloud(settings: BusinessSettings): P
       const payload = {
         id: 'default',
         name: settings.name,
+        logo_url: settings.logoUrl || null,
         address: settings.address,
         landmark: settings.landmark,
         phone: settings.phone,

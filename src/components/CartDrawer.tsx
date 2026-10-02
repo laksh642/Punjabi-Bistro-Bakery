@@ -36,6 +36,7 @@ export const CartDrawer: React.FC = () => {
     setIsCartOpen,
     deliveryZones,
     businessSettings,
+    isStoreOpen,
     coupons,
     appliedCoupon,
     couponError,
@@ -190,6 +191,10 @@ export const CartDrawer: React.FC = () => {
 
   const handleProceedToCheckout = () => {
     if (cart.length === 0) return;
+    if (!isStoreOpen) {
+      setErrorMessage(`Bakery is currently closed for online orders. Kitchen will reopen at ${businessSettings.openingTime}.`);
+      return;
+    }
     if (!user) {
       try {
         sessionStorage.setItem('pb_pending_checkout', 'true');
@@ -202,6 +207,10 @@ export const CartDrawer: React.FC = () => {
 
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isStoreOpen) {
+      setErrorMessage(`Bakery is currently closed for online orders. Kitchen will reopen at ${businessSettings.openingTime}.`);
+      return;
+    }
     if (!user) {
       setErrorMessage('Sign in with Google is required to place your order.');
       try {
@@ -930,13 +939,16 @@ export const CartDrawer: React.FC = () => {
                   <button
                     type="submit"
                     disabled={
+                      !isStoreOpen ||
                       isPlacingOrder ||
                       (orderType === 'delivery' && deliveryPincode.trim() !== '142042') ||
                       customerPhone.replace(/\D/g, '').length !== 10
                     }
                     className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs sm:text-sm py-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:bg-stone-500 disabled:cursor-not-allowed"
                   >
-                    {isPlacingOrder ? (
+                    {!isStoreOpen ? (
+                      <span>Store Currently Closed (Ordering Paused)</span>
+                    ) : isPlacingOrder ? (
                       <>
                         <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                         <span>Sending to Bakery...</span>
@@ -1069,7 +1081,16 @@ export const CartDrawer: React.FC = () => {
                 ₹{cartSubtotal - discountAmount}
               </span>
             </div>
-            {user ? (
+            {!isStoreOpen ? (
+              <button
+                type="button"
+                disabled
+                className="bg-stone-300 text-stone-600 font-semibold text-xs sm:text-sm px-4 py-3 rounded-xl cursor-not-allowed select-none"
+                title="Bakery is currently closed for online ordering"
+              >
+                Store Closed (Opens at {businessSettings.openingTime})
+              </button>
+            ) : user ? (
               <button
                 onClick={handleProceedToCheckout}
                 className="bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs sm:text-sm px-6 py-3 rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"

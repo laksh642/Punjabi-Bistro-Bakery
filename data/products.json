@@ -12,6 +12,7 @@
     "isBestseller": true,
     "isEggless": true,
     "isVegetarian": true,
+    "isSpicy": false,
     "prepTimeMinutes": 30,
     "customizationGroups": [
       {

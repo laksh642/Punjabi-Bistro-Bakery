@@ -150,6 +150,42 @@ CREATE TABLE IF NOT EXISTS public.products (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 5b. Business Settings Table (Live Store Details, Master Open/Close, Logo, UPI, Contact)
+CREATE TABLE IF NOT EXISTS public.business_settings (
+  id TEXT PRIMARY KEY DEFAULT 'default',
+  name TEXT NOT NULL DEFAULT 'Punjabi Bistro & Bakery',
+  logo_url TEXT,
+  address TEXT DEFAULT 'Near Udham Singh Chowk, Dharamkot, Punjab 142042',
+  landmark TEXT DEFAULT 'Near Udham Singh Chowk',
+  phone TEXT DEFAULT '098562 04951',
+  whatsapp TEXT DEFAULT '919856204951',
+  is_open_manual BOOLEAN DEFAULT TRUE,
+  opening_time TEXT DEFAULT '10:00',
+  closing_time TEXT DEFAULT '22:00',
+  weekly_off TEXT DEFAULT 'None (Open All 7 Days)',
+  upi_id TEXT DEFAULT 'punjabibistro@upi',
+  upi_merchant_name TEXT DEFAULT 'Punjabi Bistro and Bakery',
+  announcement_text TEXT DEFAULT 'Fresh batch of eggless cakes and pizza ready today! Book before 9:30 PM for same-day delivery.',
+  show_announcement BOOLEAN DEFAULT TRUE,
+  max_orders_per_slot INTEGER DEFAULT 6,
+  default_prep_minutes INTEGER DEFAULT 25,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 5c. Delivery Zones Table
+CREATE TABLE IF NOT EXISTS public.delivery_zones (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  min_order NUMERIC DEFAULT 0,
+  delivery_fee NUMERIC DEFAULT 0,
+  free_delivery_above NUMERIC DEFAULT 499,
+  estimated_time TEXT DEFAULT '30-45 mins',
+  description TEXT,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- 6. Dedicated Authorized Administrators Registry (Production Auth)
 CREATE TABLE IF NOT EXISTS public.admin_users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

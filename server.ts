@@ -848,6 +848,7 @@ async function loadSettingsFromServer(): Promise<any> {
     if (!error && data) {
       const mapped = {
         name: data.name || 'Punjabi Bistro & Bakery',
+        logoUrl: data.logo_url || data.logoUrl || '',
         address: data.address || 'Near Udham Singh Chowk, Dharamkot, Punjab 142042',
         landmark: data.landmark || 'Near Udham Singh Chowk',
         phone: data.phone || '098562 04951',
@@ -896,6 +897,7 @@ async function saveSettingsToServer(settings: any): Promise<boolean> {
     const payload = {
       id: 'default',
       name: settings.name,
+      logo_url: settings.logoUrl || null,
       address: settings.address,
       landmark: settings.landmark,
       phone: settings.phone,

@@ -689,23 +689,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     localStorage.setItem('pb_favorites', JSON.stringify(favorites));
   }, [favorites]);
 
-  // Store open detection
+  // Authoritative Store Open/Closed master status
+  // Controlled authoritatively by the administrator's Open/Closed master switch
   const isStoreOpen = React.useMemo(() => {
-    if (!businessSettings.isOpenManual) return false;
-    // Current time check
-    const now = new Date();
-    const currentHours = now.getHours();
-    const currentMinutes = now.getMinutes();
-    const currentMinsTotal = currentHours * 60 + currentMinutes;
-
-    const [openH, openM] = businessSettings.openingTime.split(':').map(Number);
-    const [closeH, closeM] = businessSettings.closingTime.split(':').map(Number);
-    const openMinsTotal = openH * 60 + openM;
-    const closeMinsTotal = closeH * 60 + closeM;
-
-    // Normal day open period
-    return currentMinsTotal >= openMinsTotal && currentMinsTotal <= closeMinsTotal;
-  }, [businessSettings]);
+    return Boolean(businessSettings.isOpenManual);
+  }, [businessSettings.isOpenManual]);
 
   // Synchronize cart items with authoritative database product prices
   const authoritativeCart = React.useMemo(() => {
@@ -1157,6 +1145,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const placeOrder = async (
     orderData: Omit<Order, 'id' | 'orderNumber' | 'createdAt' | 'status' | 'trackingToken'>
   ): Promise<{ success: boolean; order?: Order; error?: string }> => {
+    if (!isStoreOpen) {
+      return {
+        success: false,
+        error: `Store is currently closed for ordering. The kitchen will reopen at ${businessSettings.openingTime}.`,
+      };
+    }
+
     const finalUserId = orderData.userId || `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
     // Ensure order items use authoritative prices from the active database
