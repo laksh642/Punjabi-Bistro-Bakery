@@ -369,4 +369,119 @@ BEGIN
   BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.delivery_zones; EXCEPTION WHEN OTHERS THEN NULL; END;
   BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.coupons; EXCEPTION WHEN OTHERS THEN NULL; END;
   BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.categories; EXCEPTION WHEN OTHERS THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.customer_issues; EXCEPTION WHEN OTHERS THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.orders; EXCEPTION WHEN OTHERS THEN NULL; END;
 END $$;
+
+
+-- ==========================================================
+-- 8. CUSTOMER SECURITY HARDENING: ORDERS & CUSTOMER ISSUES
+-- ==========================================================
+
+-- A. ORDERS SECURITY HARDENING
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS user_id UUID;
+CREATE INDEX IF NOT EXISTS idx_orders_user_id ON public.orders (user_id);
+ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+
+-- Deny anonymous grants explicitly
+REVOKE ALL ON public.orders FROM anon;
+GRANT SELECT, INSERT ON public.orders TO authenticated;
+GRANT ALL ON public.orders TO service_role;
+
+-- Policy 1: Authenticated Customer can read only their own orders; Admins can read all
+DROP POLICY IF EXISTS "orders_select_policy" ON public.orders;
+CREATE POLICY "orders_select_policy"
+  ON public.orders
+  FOR SELECT
+  TO authenticated
+  USING (
+    auth.uid() = user_id
+    OR EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
+    )
+  );
+
+-- Policy 2: Authenticated Customer can only insert orders with their own user_id
+DROP POLICY IF EXISTS "orders_insert_policy" ON public.orders;
+CREATE POLICY "orders_insert_policy"
+  ON public.orders
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+    OR EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
+    )
+  );
+
+-- Policy 3: Only Admins can update orders
+DROP POLICY IF EXISTS "orders_admin_update" ON public.orders;
+CREATE POLICY "orders_admin_update"
+  ON public.orders
+  FOR UPDATE
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
+    )
+  );
+
+
+-- B. CUSTOMER ISSUES SECURITY HARDENING
+ALTER TABLE public.customer_issues ADD COLUMN IF NOT EXISTS user_id UUID;
+CREATE INDEX IF NOT EXISTS idx_customer_issues_user_id ON public.customer_issues (user_id);
+ALTER TABLE public.customer_issues ENABLE ROW LEVEL SECURITY;
+
+-- Deny anonymous grants explicitly (No guest reading or guest submission)
+REVOKE ALL ON public.customer_issues FROM anon;
+GRANT SELECT, INSERT ON public.customer_issues TO authenticated;
+GRANT ALL ON public.customer_issues TO service_role;
+
+-- Policy 1: Authenticated Customer can read only their own issues; Admins can read all
+DROP POLICY IF EXISTS "customer_issues_select" ON public.customer_issues;
+CREATE POLICY "customer_issues_select"
+  ON public.customer_issues
+  FOR SELECT
+  TO authenticated
+  USING (
+    auth.uid() = user_id
+    OR EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
+    )
+  );
+
+-- Policy 2: Only Authenticated Customer can submit their OWN issue
+DROP POLICY IF EXISTS "customer_issues_insert" ON public.customer_issues;
+CREATE POLICY "customer_issues_insert"
+  ON public.customer_issues
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+    OR EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
+    )
+  );
+
+-- Policy 3: Only Admins can update customer issues (resolution notes & status)
+DROP POLICY IF EXISTS "customer_issues_admin_modify" ON public.customer_issues;
+CREATE POLICY "customer_issues_admin_modify"
+  ON public.customer_issues
+  FOR UPDATE
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
+    )
+  );
+

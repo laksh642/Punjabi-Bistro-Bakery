@@ -1121,8 +1121,12 @@ export async function saveReviewToCloud(review: ReviewItem): Promise<boolean> {
 }
 
 export async function saveCustomerIssueToCloud(issue: CustomerIssue): Promise<boolean> {
-  const payload = {
+  const authUser = (await supabase.auth.getUser()).data.user;
+  const currentUserId = issue.userId || authUser?.id || null;
+
+  const payload: Record<string, any> = {
     id: issue.id,
+    user_id: currentUserId,
     order_number: issue.orderNumber,
     customer_phone: issue.customerPhone,
     customer_name: issue.customerName,
@@ -1135,12 +1139,13 @@ export async function saveCustomerIssueToCloud(issue: CustomerIssue): Promise<bo
 
   let saved = false;
 
-  // 1. Direct Supabase save
+  // 1. Direct Supabase save (Enforces RLS authenticated user_id)
   try {
     const { error } = await supabase.from('customer_issues').upsert(payload, { onConflict: 'id' });
     if (!error) saved = true;
+    else console.warn('saveCustomerIssueToCloud Supabase error:', error);
   } catch (err) {
-    console.warn('saveCustomerIssueToCloud Supabase error:', err);
+    console.warn('saveCustomerIssueToCloud Supabase exception:', err);
   }
 
   // 2. Server persistence endpoint
@@ -1148,14 +1153,14 @@ export async function saveCustomerIssueToCloud(issue: CustomerIssue): Promise<bo
     const res = await fetch('/api/customer/issues', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(issue),
+      body: JSON.stringify({ ...issue, userId: currentUserId }),
     });
     if (res.ok) saved = true;
   } catch (err) {
     console.warn('saveCustomerIssueToCloud server error:', err);
   }
 
-  // 3. Local storage and cross-window event
+  // 3. Local storage and cross-window event (Cache only)
   try {
     const existing = JSON.parse(localStorage.getItem('pb_issues') || '[]');
     const filtered = existing.filter((i: any) => i.id !== issue.id);

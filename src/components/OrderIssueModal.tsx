@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
-import { X, AlertCircle, CheckCircle2, Phone, MessageCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, AlertCircle, CheckCircle2, Phone, LogIn, ShieldAlert } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
+import { useCustomerAuth } from '../context/CustomerAuthContext';
 import { CustomerIssue } from '../types';
 
 export const OrderIssueModal: React.FC = () => {
   const { isIssueModalOpen, setIsIssueModalOpen, submitIssue, businessSettings } = useStore();
+  const { user, customerProfile, loginWithGoogle, openLoginModal } = useCustomerAuth();
 
   const [orderNumber, setOrderNumber] = useState('');
   const [customerName, setCustomerName] = useState('');
@@ -16,12 +18,31 @@ export const OrderIssueModal: React.FC = () => {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
+  // Pre-fill fields when customer is logged in
+  useEffect(() => {
+    if (user) {
+      if (!customerName) {
+        setCustomerName(customerProfile?.fullName || user.user_metadata?.full_name || user.email?.split('@')[0] || '');
+      }
+      if (!customerPhone && customerProfile?.phone) {
+        setCustomerPhone(customerProfile.phone.replace(/\D/g, '').slice(0, 10));
+      }
+    }
+  }, [user, customerProfile]);
+
   if (!isIssueModalOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!user) {
+      setSubmitError('Customer sign-in required. Please sign in with your Google account to submit an issue ticket.');
+      return;
+    }
+
     const cleanDigits = customerPhone.replace(/\D/g, '');
     if (!customerName.trim() || !description.trim()) {
+      setSubmitError('Please fill in your name and issue details.');
       return;
     }
     if (cleanDigits.length !== 10) {
@@ -34,6 +55,7 @@ export const OrderIssueModal: React.FC = () => {
 
     try {
       const ok = await submitIssue({
+        userId: user.id,
         orderNumber: orderNumber.trim() || 'N/A',
         customerName: customerName.trim(),
         customerPhone: cleanDigits,
@@ -44,7 +66,7 @@ export const OrderIssueModal: React.FC = () => {
       if (ok) {
         setSubmitted(true);
       } else {
-        setSubmitError('Unable to record issue at this time. Please check your internet connection or call our manager directly.');
+        setSubmitError('Unable to record issue at this time. Please check your connection or contact our manager directly.');
       }
     } catch (err: any) {
       setSubmitError(err.message || 'An unexpected error occurred while saving your issue ticket.');
@@ -84,7 +106,54 @@ export const OrderIssueModal: React.FC = () => {
 
         {/* Content */}
         <div className="p-6 bg-white">
-          {submitted ? (
+          {!user ? (
+            /* Guest Barrier: Require Google Customer Login */
+            <div className="text-center py-6 space-y-4 animate-in fade-in duration-300">
+              <div className="w-14 h-14 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto border border-amber-200 shadow-xs">
+                <ShieldAlert className="w-8 h-8 text-amber-600" />
+              </div>
+              <div className="space-y-1.5">
+                <h3 className="font-serif text-lg font-bold text-stone-900">
+                  Customer Sign-In Required
+                </h3>
+                <p className="text-xs text-stone-600 max-w-sm mx-auto leading-relaxed">
+                  To protect your privacy, link tickets directly to your customer account, and receive real-time updates from our manager, please sign in with your Google account.
+                </p>
+              </div>
+
+              <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    loginWithGoogle();
+                  }}
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-5 py-2.5 rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-sm"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span>Sign In with Google</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  className="px-4 py-2.5 rounded-xl border border-stone-200 text-xs font-semibold text-stone-700 hover:bg-stone-50 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              {/* Instant Call Alternative */}
+              <div className="pt-4 mt-2 border-t border-stone-100 flex items-center justify-between text-xs text-stone-600">
+                <span>Need immediate phone support?</span>
+                <a
+                  href={`tel:${businessSettings.phone.replace(/\s+/g, '')}`}
+                  className="font-bold text-emerald-700 flex items-center gap-1 hover:underline"
+                >
+                  <Phone className="w-3.5 h-3.5" />
+                  <span>Call {businessSettings.phone}</span>
+                </a>
+              </div>
+            </div>
+          ) : submitted ? (
             <div className="text-center py-6 space-y-4 animate-in zoom-in-95 duration-300">
               <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto text-3xl border-2 border-emerald-300 shadow-sm animate-bounce">
                 <CheckCircle2 className="w-10 h-10 text-emerald-600" />
@@ -106,6 +175,10 @@ export const OrderIssueModal: React.FC = () => {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="flex items-center justify-between pb-1 border-b border-stone-100 text-xs text-stone-600">
+                <span>Signed in as: <strong className="text-emerald-900">{user.email}</strong></span>
+              </div>
+
               <p className="text-xs text-emerald-800/80 leading-relaxed">
                 We take all feedback seriously. If you experienced a delay, missing item, or quality concern, please let us know so we can make it right immediately.
               </p>

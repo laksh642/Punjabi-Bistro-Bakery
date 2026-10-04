@@ -159,6 +159,7 @@ export interface CustomCakeEnquiry {
 
 export interface CustomerIssue {
   id: string;
+  userId?: string;
   orderNumber: string;
   customerPhone: string;
   customerName: string;
