@@ -498,29 +498,31 @@ export async function fetchCustomerOrdersFromCloud(
     }
   }
 
-  // 2. Direct client query: fetch orders and filter strictly for this authenticated customer
+  // 2. Direct client query: fetch orders strictly for this authenticated customer at database level
   try {
-    const { data: allData, error: allErr } = (await withTimeout(
-      supabase.from('orders').select('*').order('created_at', { ascending: false }).limit(100) as any,
+    let query = supabase.from('orders').select('*');
+    if (userId && email) {
+      query = query.or(`user_id.eq.${userId},customer_email.eq.${email}`);
+    } else if (userId) {
+      query = query.eq('user_id', userId);
+    } else if (email) {
+      query = query.eq('customer_email', email);
+    } else {
+      return [];
+    }
+
+    const { data: userOrders, error: orderErr } = (await withTimeout(
+      query.order('created_at', { ascending: false }).limit(50) as any,
       7000
     )) as any;
 
-    if (!allErr && Array.isArray(allData)) {
-      const userOrders = allData.filter((row: any) => {
-        if (row.user_id && row.user_id === userId) return true;
-        const items = Array.isArray(row.items) ? row.items : [];
-        const meta = items.find((i: any) => i && i._meta)?._meta;
-        if (meta && (meta.userId === userId || (email && meta.customerEmail === email))) {
-          return true;
-        }
-        return false;
-      });
+    if (!orderErr && Array.isArray(userOrders)) {
       return userOrders.map(mapRowToOrder);
     }
 
     return [];
   } catch (err) {
-    console.warn('fetchCustomerOrdersFromCloud error:', err);
+    console.warn('fetchCustomerOrdersFromCloud notice:', err);
     return [];
   }
 }

@@ -12,11 +12,13 @@ export const OrderIssueModal: React.FC = () => {
   const [issueType, setIssueType] = useState<CustomerIssue['issueType']>('late_delivery');
   const [description, setDescription] = useState('');
   const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
   if (!isIssueModalOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanDigits = customerPhone.replace(/\D/g, '');
     if (!customerName.trim() || !description.trim()) {
@@ -27,21 +29,34 @@ export const OrderIssueModal: React.FC = () => {
       return;
     }
     setPhoneError(null);
+    setSubmitError(null);
+    setIsSubmitting(true);
 
-    submitIssue({
-      orderNumber: orderNumber.trim() || 'N/A',
-      customerName: customerName.trim(),
-      customerPhone: cleanDigits,
-      issueType,
-      description: description.trim(),
-    });
+    try {
+      const ok = await submitIssue({
+        orderNumber: orderNumber.trim() || 'N/A',
+        customerName: customerName.trim(),
+        customerPhone: cleanDigits,
+        issueType,
+        description: description.trim(),
+      });
 
-    setSubmitted(true);
+      if (ok) {
+        setSubmitted(true);
+      } else {
+        setSubmitError('Unable to record issue at this time. Please check your internet connection or call our manager directly.');
+      }
+    } catch (err: any) {
+      setSubmitError(err.message || 'An unexpected error occurred while saving your issue ticket.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleClose = () => {
     setIsIssueModalOpen(false);
     setSubmitted(false);
+    setSubmitError(null);
     setDescription('');
   };
 
@@ -70,22 +85,22 @@ export const OrderIssueModal: React.FC = () => {
         {/* Content */}
         <div className="p-6 bg-white">
           {submitted ? (
-            <div className="text-center py-6 space-y-4">
-              <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto text-2xl border border-emerald-200">
-                <CheckCircle2 className="w-8 h-8" />
+            <div className="text-center py-6 space-y-4 animate-in zoom-in-95 duration-300">
+              <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto text-3xl border-2 border-emerald-300 shadow-sm animate-bounce">
+                <CheckCircle2 className="w-10 h-10 text-emerald-600" />
               </div>
               <h3 className="font-serif text-xl font-bold text-emerald-950">
-                Issue Ticket Logged
+                Issue Ticket Logged in Database
               </h3>
-              <p className="text-xs text-emerald-800/80 max-w-xs mx-auto leading-relaxed">
-                Thank you for bringing this to our attention. The manager at Punjabi Bistro has received your ticket and will call you back shortly.
+              <p className="text-xs text-emerald-800/90 max-w-xs mx-auto leading-relaxed">
+                Thank you for bringing this to our attention. The store manager at Punjabi Bistro has received your ticket centrally and will contact you shortly.
               </p>
               <div className="pt-2">
                 <button
                   onClick={handleClose}
-                  className="bg-emerald-700 text-white text-xs font-semibold px-5 py-2.5 rounded-xl hover:bg-emerald-800 transition-colors cursor-pointer"
+                  className="bg-emerald-700 text-white text-xs font-semibold px-6 py-2.5 rounded-xl hover:bg-emerald-800 transition-colors cursor-pointer shadow-sm"
                 >
-                  Close
+                  Done
                 </button>
               </div>
             </div>
@@ -94,6 +109,13 @@ export const OrderIssueModal: React.FC = () => {
               <p className="text-xs text-emerald-800/80 leading-relaxed">
                 We take all feedback seriously. If you experienced a delay, missing item, or quality concern, please let us know so we can make it right immediately.
               </p>
+
+              {submitError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                  <span>{submitError}</span>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-emerald-900 mb-1">
@@ -190,9 +212,14 @@ export const OrderIssueModal: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs py-2.5 rounded-xl transition-colors cursor-pointer"
+                  disabled={isSubmitting}
+                  className="flex-1 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-semibold text-xs py-2.5 rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-2"
                 >
-                  Submit Support Ticket
+                  {isSubmitting ? (
+                    <span>Submitting Ticket...</span>
+                  ) : (
+                    <span>Submit Support Ticket</span>
+                  )}
                 </button>
               </div>
 

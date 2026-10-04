@@ -160,7 +160,7 @@ INSERT INTO public.business_settings (
   upi_id, upi_merchant_name, announcement_text, show_announcement,
   max_orders_per_slot, default_prep_minutes
 ) VALUES (
-  'default', 'Punjabi Bistro & Bakery', NULL,
+  'default', 'Punjabi Bistro & Bakery', '/logoo.png',
   'Near Udham Singh Chowk, Dharamkot, Punjab 142042', 'Near Udham Singh Chowk',
   '098562 04951', '919856204951',
   TRUE, '10:00', '22:00', 'None (Open All 7 Days)',
@@ -212,9 +212,9 @@ CREATE POLICY "zones_admin_modify"
 
 INSERT INTO public.delivery_zones (id, name, min_order, delivery_fee, free_delivery_above, estimated_time, description, is_active)
 VALUES
-  ('zone-1', 'Dharamkot Town Center', 150, 20, 399, '25-35 mins', 'Within Dharamkot main market and 2km radius', true),
-  ('zone-2', 'Outer Dharamkot & Bypass', 250, 35, 499, '35-45 mins', 'Bypass area and surrounding residential colonies', true),
-  ('zone-3', 'Nearby Villages (within 6km)', 400, 50, 799, '45-60 mins', 'Jalalabad East, Kot Sadar Khan & rural outskirts', true)
+  ('zone-1', 'Dharamkot Main Town & Udham Singh Chowk', 150, 20, 299, '25-35 mins', 'Covers central Dharamkot within 2.5 km of Udham Singh Chowk.', true),
+  ('zone-2', 'Dharamkot Outskirts & Outer Link Roads', 250, 35, 449, '35-45 mins', 'Covers residential colonies and bypass areas (2.5 km to 5 km).', true),
+  ('zone-3', 'Surrounding Villages & Rural Connectors', 400, 55, 699, '45-60 mins', 'Covers nearby village periphery (up to 8 km) with dedicated delivery.', true)
 ON CONFLICT (id) DO NOTHING;
 
 
@@ -262,9 +262,12 @@ CREATE POLICY "coupons_admin_modify"
 
 INSERT INTO public.coupons (id, code, title, subtitle, discount_type, discount_value, max_discount, min_order, is_active, badge)
 VALUES
-  ('coupon-1', 'BISTRO100', '₹100 OFF', 'Flat ₹100 off on gourmet cakes above ₹599', 'flat', 100, 100, 599, true, 'BEST VALUE'),
-  ('coupon-2', 'WELCOME10', '10% OFF', 'Enjoy 10% off your entire order above ₹299', 'percentage', 10, 150, 299, true, 'POPULAR'),
-  ('coupon-3', 'FREEDEL', 'FREE DELIVERY', 'Free delivery on all orders above ₹499', 'flat', 35, 50, 499, true, 'FREE SHIPPING')
+  ('coupon-1', 'BISTRO100', '₹100 FLAT OFF', 'On orders above ₹499 • Freshly prepared pizzas, burgers & bakery items', 'flat', 100, NULL, 499, true, 'Trending Deal'),
+  ('coupon-2', 'BISTRO50', '15% OFF (Up to ₹75)', 'On orders above ₹399 • Authentic fresh taste in Dharamkot', 'percentage', 15, 75, 399, true, 'Popular'),
+  ('coupon-3', 'WELCOME10', '10% FIRST ORDER OFF', 'On minimum order of ₹199 • Fast takeaway & delivery', 'percentage', 10, 50, 199, true, 'New Customer'),
+  ('coupon-4', 'CAKE100', '₹100 OFF ON CAKES', '100% Pure Eggless 1Kg+ Cakes • With candles & cutting knife', 'flat', 100, NULL, 500, true, 'Bakery Special'),
+  ('coupon-5', 'FREEDEL', '₹40 OFF DELIVERY', 'On orders above ₹299 • Safe & fast local delivery in Dharamkot', 'flat', 40, 40, 299, true, 'Free Shipping'),
+  ('coupon-6', 'SUPER20', '20% OFF (Up to ₹150)', 'On large group orders above ₹799', 'percentage', 20, 150, 799, true, 'Party Saver')
 ON CONFLICT (id) DO NOTHING;
 
 
@@ -306,11 +309,13 @@ CREATE POLICY "categories_admin_modify"
 INSERT INTO public.categories (id, name, icon, display_order)
 VALUES
   ('all', 'All Items', 'Sparkles', 0),
-  ('cakes', 'Cakes & Bakery', 'Cake', 1),
-  ('pizzas', 'Woodfire Pizzas', 'Pizza', 2),
-  ('burgers', 'Burgers & Wraps', 'Sandwich', 3),
-  ('shakes', 'Shakes & Mocktails', 'GlassWater', 4),
-  ('snacks', 'Quick Bites', 'UtensilsCrossed', 5)
+  ('cakes', 'Cakes & Pastries', 'Cake', 1),
+  ('pasta', 'Pasta & Italian', 'UtensilsCrossed', 2),
+  ('pizza', 'Handcrafted Pizza', 'Pizza', 3),
+  ('burgers', 'Burgers & Wraps', 'Sandwich', 4),
+  ('sandwiches', 'Grilled Sandwiches', 'Layers', 5),
+  ('fries', 'Fries & Quick Bites', 'Flame', 6),
+  ('beverages', 'Drinks & Fruit Beer', 'Coffee', 7)
 ON CONFLICT (id) DO NOTHING;
 
 

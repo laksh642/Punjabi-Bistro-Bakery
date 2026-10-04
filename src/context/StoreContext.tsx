@@ -198,7 +198,7 @@ interface StoreContextType {
   // Issues & Feedback
   issues: CustomerIssue[];
   loadIssuesFromCloud: () => Promise<CustomerIssue[]>;
-  submitIssue: (issue: Omit<CustomerIssue, 'id' | 'createdAt' | 'status'>) => void;
+  submitIssue: (issue: Omit<CustomerIssue, 'id' | 'createdAt' | 'status'>) => Promise<boolean>;
   resolveIssue: (id: string, notes: string) => void;
   feedbacks: CustomerFeedback[];
   submitFeedback: (feedback: Omit<CustomerFeedback, 'id' | 'createdAt'>) => void;
@@ -1221,7 +1221,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
     }
 
-    const finalUserId = orderData.userId || `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    if (!orderData.userId) {
+      return {
+        success: false,
+        error: 'Please sign in with Google before placing your order.',
+      };
+    }
+
+    const finalUserId = orderData.userId;
 
     // Ensure order items use authoritative prices from the active database
     const authoritativeItems = (orderData.items || authoritativeCart).map((item) => {
@@ -1476,20 +1483,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   // Issues
-  const submitIssue = (issueData: Omit<CustomerIssue, 'id' | 'createdAt' | 'status'>) => {
+  const submitIssue = async (issueData: Omit<CustomerIssue, 'id' | 'createdAt' | 'status'>): Promise<boolean> => {
     const newIssue: CustomerIssue = {
       ...issueData,
       id: `iss-${Date.now()}`,
       status: 'open',
       createdAt: new Date().toISOString(),
     };
-    setIssues((prev) => [newIssue, ...prev]);
-
-    saveCustomerIssueToCloud(newIssue).then(() => {
-      loadIssuesFromCloud();
-    }).catch((err) => {
+    try {
+      const saved = await saveCustomerIssueToCloud(newIssue);
+      if (saved) {
+        setIssues((prev) => [newIssue, ...prev]);
+        loadIssuesFromCloud().catch(() => {});
+        return true;
+      }
+    } catch (err) {
       console.warn('Supabase saveCustomerIssue error:', err);
-    });
+    }
+    return false;
   };
 
   const resolveIssue = (id: string, notes: string) => {
@@ -1582,7 +1593,7 @@ _Sent via Punjabi Bistro & Bakery Dharamkot Website_`;
     <StoreContext.Provider
       value={{
         products,
-        categories: INITIAL_CATEGORIES,
+        categories,
         selectedCategory,
         setSelectedCategory,
         fulfillmentMode,

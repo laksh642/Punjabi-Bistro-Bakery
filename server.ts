@@ -1034,10 +1034,9 @@ const handleSaveProduct = async (req: Request, res: Response) => {
   }
 };
 app.post('/api/admin/products', requireAdmin, handleSaveProduct);
-app.post('/api/products', handleSaveProduct);
 
 /**
- * DELETE /api/admin/products/:id and DELETE /api/products/:id
+ * DELETE /api/admin/products/:id
  * Deletes a product with authoritative cross-device persistence.
  */
 const handleDeleteProduct = async (req: Request, res: Response) => {
@@ -1055,7 +1054,6 @@ const handleDeleteProduct = async (req: Request, res: Response) => {
   }
 };
 app.delete('/api/admin/products/:id', requireAdmin, handleDeleteProduct);
-app.delete('/api/products/:id', handleDeleteProduct);
 
 /**
  * GET /api/settings
@@ -1071,7 +1069,7 @@ app.get('/api/settings', async (_req: Request, res: Response) => {
 });
 
 /**
- * POST /api/admin/settings and POST /api/settings
+ * POST /api/admin/settings
  * Saves business settings across all devices.
  */
 const handleSaveSettings = async (req: Request, res: Response) => {
@@ -1089,7 +1087,6 @@ const handleSaveSettings = async (req: Request, res: Response) => {
   }
 };
 app.post('/api/admin/settings', requireAdmin, handleSaveSettings);
-app.post('/api/settings', handleSaveSettings);
 
 /**
  * GET /api/zones
@@ -1105,7 +1102,7 @@ app.get('/api/zones', async (_req: Request, res: Response) => {
 });
 
 /**
- * POST /api/admin/zones and POST /api/zones
+ * POST /api/admin/zones
  * Updates delivery zones across all devices.
  */
 const handleSaveZones = async (req: Request, res: Response) => {
@@ -1123,7 +1120,6 @@ const handleSaveZones = async (req: Request, res: Response) => {
   }
 };
 app.post('/api/admin/zones', requireAdmin, handleSaveZones);
-app.post('/api/zones', handleSaveZones);
 
 /**
  * GET /api/categories
@@ -1134,7 +1130,7 @@ app.get('/api/categories', (_req: Request, res: Response) => {
 });
 
 /**
- * POST /api/admin/categories and POST /api/categories
+ * POST /api/admin/categories
  * Updates categories.
  */
 const handleSaveCategories = (req: Request, res: Response) => {
@@ -1147,7 +1143,6 @@ const handleSaveCategories = (req: Request, res: Response) => {
   res.json({ success: true, categories });
 };
 app.post('/api/admin/categories', requireAdmin, handleSaveCategories);
-app.post('/api/categories', handleSaveCategories);
 
 /**
  * POST /api/upload
