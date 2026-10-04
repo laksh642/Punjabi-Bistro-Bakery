@@ -124,10 +124,10 @@ interface StoreContextType {
   setSelectedCategory: (catId: string) => void;
   fulfillmentMode: 'delivery' | 'pickup' | 'dine_in';
   setFulfillmentMode: (mode: 'delivery' | 'pickup' | 'dine_in') => void;
-  updateProduct: (product: Product) => void;
-  toggleProductAvailability: (productId: string) => void;
-  addProduct: (product: Omit<Product, 'id'>) => void;
-  deleteProduct: (productId: string) => void;
+  updateProduct: (product: Product) => Promise<boolean>;
+  toggleProductAvailability: (productId: string) => Promise<boolean>;
+  addProduct: (product: Omit<Product, 'id'>) => Promise<boolean>;
+  deleteProduct: (productId: string) => Promise<boolean>;
 
   // Cart
   cart: CartItem[];
@@ -145,7 +145,7 @@ interface StoreContextType {
 
   // Delivery & Settings
   deliveryZones: DeliveryZone[];
-  updateDeliveryZone: (zone: DeliveryZone) => void;
+  updateDeliveryZone: (zone: DeliveryZone) => Promise<boolean>;
   saveAllDeliveryZones: (zones: DeliveryZone[]) => Promise<boolean>;
   businessSettings: BusinessSettings;
   updateBusinessSettings: (settings: BusinessSettings) => Promise<boolean>;
@@ -160,10 +160,10 @@ interface StoreContextType {
   couponError: string | null;
   applyCoupon: (code: string) => boolean;
   removeCoupon: () => void;
-  addCoupon: (coupon: Omit<Coupon, 'id'>) => void;
-  updateCoupon: (coupon: Coupon) => void;
-  deleteCoupon: (id: string) => void;
-  toggleCouponActive: (id: string) => void;
+  addCoupon: (coupon: Omit<Coupon, 'id'>) => Promise<boolean>;
+  updateCoupon: (coupon: Coupon) => Promise<boolean>;
+  deleteCoupon: (id: string) => Promise<boolean>;
+  toggleCouponActive: (id: string) => Promise<boolean>;
   loadCouponsFromCloud: () => Promise<Coupon[]>;
 
   // Orders
@@ -588,9 +588,25 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     syncWithCloud();
 
-    if (!isSupabaseConfigured) return;
+    // Periodic & focus-based background sync for multi-device cross-tab freshness
+    const handleFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        syncWithCloud();
+      }
+    };
+    window.addEventListener('focus', handleFocusOrVisible);
+    document.addEventListener('visibilitychange', handleFocusOrVisible);
+    const interval = setInterval(syncWithCloud, 20000); // 20s background sync
 
-    // Public broadcast channel strictly for menu product updates
+    if (!isSupabaseConfigured) {
+      return () => {
+        window.removeEventListener('focus', handleFocusOrVisible);
+        document.removeEventListener('visibilitychange', handleFocusOrVisible);
+        clearInterval(interval);
+      };
+    }
+
+    // Public broadcast channel for live business updates across all devices
     const channel = supabase
       .channel('pb-storefront-sync')
       .on(
@@ -631,9 +647,60 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
         }
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'business_settings' },
+        (payload) => {
+          if ((payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') && payload.new) {
+            const data = payload.new as any;
+            setBusinessSettings({
+              name: data.name || 'Punjabi Bistro & Bakery',
+              logoUrl: data.logo_url || data.logoUrl || '',
+              address: data.address || '',
+              landmark: data.landmark || '',
+              phone: data.phone || '',
+              whatsapp: data.whatsapp || '',
+              isOpenManual: data.is_open_manual !== undefined ? Boolean(data.is_open_manual) : true,
+              openingTime: data.opening_time || '10:00',
+              closingTime: data.closing_time || '22:00',
+              weeklyOff: data.weekly_off || 'None',
+              upiId: data.upi_id || 'punjabibistro@upi',
+              upiMerchantName: data.upi_merchant_name || 'Punjabi Bistro and Bakery',
+              announcementText: data.announcement_text || '',
+              showAnnouncement: data.show_announcement !== undefined ? Boolean(data.show_announcement) : true,
+              maxOrdersPerSlot: Number(data.max_orders_per_slot) || 6,
+              defaultPrepMinutes: Number(data.default_prep_minutes) || 25,
+            });
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'delivery_zones' },
+        () => {
+          loadZonesFromCloud();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'coupons' },
+        () => {
+          loadCouponsFromCloud();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'customer_issues' },
+        () => {
+          loadIssuesFromCloud();
+        }
+      )
       .subscribe();
 
     return () => {
+      window.removeEventListener('focus', handleFocusOrVisible);
+      document.removeEventListener('visibilitychange', handleFocusOrVisible);
+      clearInterval(interval);
       supabase.removeChannel(channel);
     };
   }, []);
@@ -981,7 +1048,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCouponError(null);
   };
 
-  const addCoupon = (couponData: Omit<Coupon, 'id'>) => {
+  const addCoupon = async (couponData: Omit<Coupon, 'id'>): Promise<boolean> => {
     const newCoupon: Coupon = {
       ...couponData,
       id: `coupon-${Date.now()}`,
@@ -989,21 +1056,23 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
     const updated = [newCoupon, ...coupons];
     setCoupons(updated);
-    saveCouponsToCloud(updated).catch((err) => {
-      console.warn('saveCouponsToCloud error:', err);
-    });
+    try {
+      localStorage.setItem('pb_coupons', JSON.stringify(updated));
+    } catch {}
+    return await saveCouponsToCloud(updated);
   };
 
-  const updateCoupon = (updatedCoupon: Coupon) => {
+  const updateCoupon = async (updatedCoupon: Coupon): Promise<boolean> => {
     const formatted: Coupon = {
       ...updatedCoupon,
       code: updatedCoupon.code.trim().toUpperCase(),
     };
     const updated = coupons.map((c) => (c.id === formatted.id ? formatted : c));
     setCoupons(updated);
-    saveCouponsToCloud(updated).catch((err) => {
-      console.warn('saveCouponsToCloud error:', err);
-    });
+    try {
+      localStorage.setItem('pb_coupons', JSON.stringify(updated));
+    } catch {}
+    const saved = await saveCouponsToCloud(updated);
     if (appliedCoupon?.id === formatted.id) {
       if (!formatted.isActive || cartSubtotal < formatted.minOrder) {
         setAppliedCoupon(null);
@@ -1011,20 +1080,23 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setAppliedCoupon(formatted);
       }
     }
+    return saved;
   };
 
-  const deleteCoupon = (id: string) => {
+  const deleteCoupon = async (id: string): Promise<boolean> => {
     const updated = coupons.filter((c) => c.id !== id);
     setCoupons(updated);
-    deleteCouponFromCloud(id).catch((err) => {
-      console.warn('deleteCouponFromCloud error:', err);
-    });
+    try {
+      localStorage.setItem('pb_coupons', JSON.stringify(updated));
+    } catch {}
+    const deleted = await deleteCouponFromCloud(id);
     if (appliedCoupon?.id === id) {
       setAppliedCoupon(null);
     }
+    return deleted;
   };
 
-  const toggleCouponActive = (id: string) => {
+  const toggleCouponActive = async (id: string): Promise<boolean> => {
     const updated = coupons.map((c) => {
       if (c.id === id) {
         const up = { ...c, isActive: !c.isActive };
@@ -1036,13 +1108,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return c;
     });
     setCoupons(updated);
-    saveCouponsToCloud(updated).catch((err) => {
-      console.warn('saveCouponsToCloud error:', err);
-    });
+    try {
+      localStorage.setItem('pb_coupons', JSON.stringify(updated));
+    } catch {}
+    return await saveCouponsToCloud(updated);
   };
 
   // Product Admin Operations
-  const updateProduct = (product: Product) => {
+  const updateProduct = async (product: Product): Promise<boolean> => {
     setProducts((prev) => {
       const next = prev.map((p) => (p.id === product.id ? product : p));
       try {
@@ -1051,19 +1124,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } catch {}
       return next;
     });
-    saveProductToCloud(product).catch((err) => {
-      console.warn('Supabase updateProduct sync warning:', err);
-    });
+    return await saveProductToCloud(product);
   };
 
-  const toggleProductAvailability = (productId: string) => {
+  const toggleProductAvailability = async (productId: string): Promise<boolean> => {
+    let targetProd: Product | undefined;
     setProducts((prev) => {
       const next = prev.map((p) => {
         if (p.id === productId) {
           const updated = { ...p, isAvailable: !p.isAvailable };
-          saveProductToCloud(updated).catch((err) => {
-            console.warn('Supabase toggleAvailability sync warning:', err);
-          });
+          targetProd = updated;
           return updated;
         }
         return p;
@@ -1074,9 +1144,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } catch {}
       return next;
     });
+    if (targetProd) {
+      return await saveProductToCloud(targetProd);
+    }
+    return false;
   };
 
-  const addProduct = (productData: Omit<Product, 'id'>) => {
+  const addProduct = async (productData: Omit<Product, 'id'>): Promise<boolean> => {
     const newProduct: Product = {
       ...productData,
       id: `prod-${Date.now()}`,
@@ -1089,12 +1163,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } catch {}
       return next;
     });
-    saveProductToCloud(newProduct).catch((err) => {
-      console.warn('Supabase addProduct sync warning:', err);
-    });
+    return await saveProductToCloud(newProduct);
   };
 
-  const deleteProduct = (productId: string) => {
+  const deleteProduct = async (productId: string): Promise<boolean> => {
     setProducts((prev) => {
       const next = prev.filter((p) => p.id !== productId);
       try {
@@ -1103,24 +1175,21 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } catch {}
       return next;
     });
-    deleteProductFromCloud(productId).catch((err) => {
-      console.warn('Supabase deleteProduct sync warning:', err);
-    });
+    return await deleteProductFromCloud(productId);
   };
 
   // Delivery & Settings Admin
-  const updateDeliveryZone = (zone: DeliveryZone) => {
+  const updateDeliveryZone = async (zone: DeliveryZone): Promise<boolean> => {
+    let nextList: DeliveryZone[] = [];
     setDeliveryZones((prev) => {
-      const next = prev.map((z) => (z.id === zone.id ? zone : z));
+      nextList = prev.map((z) => (z.id === zone.id ? zone : z));
       try {
-        localStorage.setItem('pb_delivery_zones', JSON.stringify(next));
-        window.dispatchEvent(new CustomEvent('pb_zones_updated', { detail: next }));
+        localStorage.setItem('pb_delivery_zones', JSON.stringify(nextList));
+        window.dispatchEvent(new CustomEvent('pb_zones_updated', { detail: nextList }));
       } catch {}
-      saveDeliveryZonesToCloud(next).catch((err) => {
-        console.warn('saveDeliveryZonesToCloud notice:', err);
-      });
-      return next;
+      return nextList;
     });
+    return await saveDeliveryZonesToCloud(nextList);
   };
 
   const saveAllDeliveryZones = async (zones: DeliveryZone[]): Promise<boolean> => {

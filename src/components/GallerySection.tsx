@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Camera, X, ZoomIn } from 'lucide-react';
-import { GALLERY_ITEMS } from '../data/initialData';
+import { GALLERY_ITEMS } from '../data/galleryData';
 
 export const GallerySection: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');

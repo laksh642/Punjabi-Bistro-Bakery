@@ -164,12 +164,16 @@ export const AdminDashboard: React.FC = () => {
         isOpenManual: nextStatus,
       };
       setSettingsForm(updated);
-      await updateBusinessSettings(updated);
-      setStoreStatusToast(
-        nextStatus
-          ? '✓ Store is now OPEN (Accepting Orders)'
-          : '✓ Store is now CLOSED (Live Orders Paused)'
-      );
+      const ok = await updateBusinessSettings(updated);
+      if (ok) {
+        setStoreStatusToast(
+          nextStatus
+            ? '✓ Store is now OPEN (Accepting Orders)'
+            : '✓ Store is now CLOSED (Live Orders Paused)'
+        );
+      } else {
+        setStoreStatusToast('⚠️ Failed to save store status to database. Please check your connection.');
+      }
       setTimeout(() => setStoreStatusToast(null), 3500);
     } catch (err: any) {
       console.error('Error toggling store status:', err);
@@ -513,12 +517,19 @@ export const AdminDashboard: React.FC = () => {
     };
 
     try {
-      updateProduct(updated);
-      setProductFeedbackToast(`✓ "${updated.name}" updated in database and synchronized across live menu!`);
-      setTimeout(() => setProductFeedbackToast(null), 4500);
-      setEditingProduct(null);
+      const ok = await updateProduct(updated);
+      if (ok) {
+        setProductFeedbackToast(`✓ "${updated.name}" updated in database and synchronized across live menu!`);
+        setTimeout(() => setProductFeedbackToast(null), 4500);
+        setEditingProduct(null);
+      } else {
+        setProductFeedbackToast(`⚠️ Could not save product to database. Please check your connection.`);
+        setTimeout(() => setProductFeedbackToast(null), 4500);
+      }
     } catch (err: any) {
       console.error(err);
+      setProductFeedbackToast(`⚠️ Error saving product: ${err.message || 'Database error'}`);
+      setTimeout(() => setProductFeedbackToast(null), 4500);
     } finally {
       setIsSavingProduct(false);
     }
@@ -545,13 +556,13 @@ export const AdminDashboard: React.FC = () => {
     setDelayModalOrder(null);
   };
 
-  const handleCreateProduct = (e: React.FormEvent) => {
+  const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProdName.trim()) return;
 
     const catObj = categories.find((c) => c.id === newProdCat);
 
-    addProduct({
+    const ok = await addProduct({
       name: newProdName.trim(),
       description: newProdDesc.trim() || 'Delicious freshly prepared bistro treat.',
       price: Number(newProdPrice),
@@ -565,9 +576,16 @@ export const AdminDashboard: React.FC = () => {
       prepTimeMinutes: 20,
     });
 
-    setShowAddProductModal(false);
-    setNewProdName('');
-    setNewProdDesc('');
+    if (ok) {
+      setProductFeedbackToast(`✓ "${newProdName.trim()}" created and saved to database!`);
+      setShowAddProductModal(false);
+      setNewProdName('');
+      setNewProdDesc('');
+      setTimeout(() => setProductFeedbackToast(null), 4500);
+    } else {
+      setProductFeedbackToast(`⚠️ Could not save new product to database.`);
+      setTimeout(() => setProductFeedbackToast(null), 4500);
+    }
   };
 
   const handleSaveQuotation = (e: React.FormEvent) => {
@@ -1244,10 +1262,23 @@ export const AdminDashboard: React.FC = () => {
                         <td className="p-3.5">
                           <input
                             type="number"
-                            value={p.price}
-                            onChange={(e) =>
-                              updateProduct({ ...p, price: Number(e.target.value) })
-                            }
+                            defaultValue={p.price}
+                            key={`price-${p.id}-${p.price}`}
+                            onBlur={async (e) => {
+                              const newPrice = Math.max(0, Number(e.target.value) || 0);
+                              if (newPrice !== p.price) {
+                                const ok = await updateProduct({ ...p, price: newPrice });
+                                if (!ok) {
+                                  setProductFeedbackToast(`⚠️ Could not save price for "${p.name}" to database.`);
+                                  setTimeout(() => setProductFeedbackToast(null), 3000);
+                                }
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                (e.target as HTMLInputElement).blur();
+                              }
+                            }}
                             className="w-20 px-2 py-1 border border-emerald-200 rounded-lg bg-emerald-50/40 font-bold text-sm text-emerald-950 focus:outline-none focus:border-emerald-600"
                           />
                         </td>
@@ -1267,7 +1298,13 @@ export const AdminDashboard: React.FC = () => {
                         </td>
                         <td className="p-3.5">
                           <button
-                            onClick={() => toggleProductAvailability(p.id)}
+                            onClick={async () => {
+                              const ok = await toggleProductAvailability(p.id);
+                              if (!ok) {
+                                setProductFeedbackToast('⚠️ Could not update availability in database.');
+                                setTimeout(() => setProductFeedbackToast(null), 3000);
+                              }
+                            }}
                             className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
                               p.isAvailable
                                 ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
@@ -1288,9 +1325,15 @@ export const AdminDashboard: React.FC = () => {
                               <span>Edit</span>
                             </button>
                             <button
-                              onClick={() => {
+                              onClick={async () => {
                                 if (confirm(`Are you sure you want to delete "${p.name}"?`)) {
-                                  deleteProduct(p.id);
+                                  const ok = await deleteProduct(p.id);
+                                  if (ok) {
+                                    setProductFeedbackToast(`✓ "${p.name}" deleted from database.`);
+                                  } else {
+                                    setProductFeedbackToast(`⚠️ Could not delete "${p.name}" from database.`);
+                                  }
+                                  setTimeout(() => setProductFeedbackToast(null), 3500);
                                 }
                               }}
                               className="text-stone-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"

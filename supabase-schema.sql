@@ -1,143 +1,22 @@
 -- ==========================================================
 -- Punjabi Bistro & Bakery, Dharamkot
--- Hardened Supabase Database Schema, Functions & RLS Security
+-- FOCUSED BUSINESS DATA PERSISTENCE MIGRATION
+-- ==========================================================
+-- NOTE:
+-- - Existing Admin Authentication (admin_keys, admin_users, admin_recovery) is UNTOUCHED.
+-- - Existing Customer Orders, Reviews, Issues & Enquiries are UNTOUCHED.
+-- - No blanket or insecure policies are introduced.
+-- - Creates the 5 missing business tables, RLS policies, Storage setup, and Realtime replication.
 -- ==========================================================
 
--- Instructions:
--- 1. Open your Supabase Dashboard: https://supabase.com/dashboard/project/mlbjulhzbhnqkzzohgcm
--- 2. Click "SQL Editor" in the left sidebar
--- 3. Click "New Query", paste this entire script and click "Run"
-
--- 1. Orders Table
-CREATE TABLE IF NOT EXISTS public.orders (
-  id TEXT PRIMARY KEY,
-  order_number TEXT UNIQUE NOT NULL,
-  tracking_token TEXT UNIQUE NOT NULL DEFAULT md5(random()::text || clock_timestamp()::text),
-  user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-  customer_email TEXT,
-  customer_name TEXT NOT NULL,
-  customer_phone TEXT NOT NULL,
-  order_type TEXT NOT NULL DEFAULT 'delivery',
-  delivery_address TEXT,
-  landmark TEXT,
-  zone_id TEXT,
-  table_number TEXT,
-  time_slot TEXT DEFAULT 'asap',
-  scheduled_date TEXT,
-  items JSONB NOT NULL DEFAULT '[]'::jsonb,
-  subtotal NUMERIC NOT NULL,
-  delivery_fee NUMERIC DEFAULT 0,
-  discount NUMERIC DEFAULT 0,
-  coupon_code TEXT,
-  total NUMERIC NOT NULL,
-  payment_method TEXT DEFAULT 'cod',
-  payment_status TEXT DEFAULT 'pending',
-  upi_txn_id TEXT,
-  status TEXT NOT NULL DEFAULT 'new',
-  order_notes TEXT,
-  is_no_contact_delivery BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  estimated_delivery_time TEXT,
-  delay_minutes INTEGER,
-  delay_message TEXT
-);
-
--- Schema Migration: Ensure user_id, customer_email, tracking_token column and performance indexes exist
-ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL;
-ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS customer_email TEXT;
-ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS tracking_token TEXT;
-UPDATE public.orders SET tracking_token = md5(random()::text || id || clock_timestamp()::text) WHERE tracking_token IS NULL;
-ALTER TABLE public.orders ALTER COLUMN tracking_token SET DEFAULT md5(random()::text || clock_timestamp()::text);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_tracking_token ON public.orders (tracking_token);
-CREATE INDEX IF NOT EXISTS idx_orders_order_number ON public.orders (order_number);
-CREATE INDEX IF NOT EXISTS idx_orders_user_id ON public.orders (user_id);
-CREATE INDEX IF NOT EXISTS idx_orders_customer_phone ON public.orders (customer_phone);
-
--- 1b. Customer Profiles Table (Persistent Google Account Records)
-CREATE TABLE IF NOT EXISTS public.customer_profiles (
-  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  user_id UUID UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
-  email TEXT NOT NULL,
-  full_name TEXT,
-  avatar_url TEXT,
-  phone TEXT,
-  address TEXT,
-  landmark TEXT,
-  city TEXT DEFAULT 'Dharamkot',
-  state TEXT DEFAULT 'Himachal Pradesh',
-  pincode TEXT DEFAULT '176219',
-  delivery_instructions TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- Schema Migration for customer_profiles
-ALTER TABLE public.customer_profiles ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
-ALTER TABLE public.customer_profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT;
-CREATE INDEX IF NOT EXISTS idx_customer_profiles_user_id ON public.customer_profiles (user_id);
-CREATE INDEX IF NOT EXISTS idx_customer_profiles_email ON public.customer_profiles (email);
-
--- 2. Custom Cake Enquiries Table
-CREATE TABLE IF NOT EXISTS public.custom_cake_enquiries (
-  id TEXT PRIMARY KEY,
-  enquiry_number TEXT UNIQUE NOT NULL,
-  customer_name TEXT NOT NULL,
-  customer_phone TEXT NOT NULL,
-  customer_whatsapp TEXT NOT NULL,
-  occasion TEXT NOT NULL,
-  event_date TEXT NOT NULL,
-  preferred_time TEXT,
-  servings TEXT,
-  weight_kg NUMERIC NOT NULL,
-  flavour TEXT NOT NULL,
-  shape TEXT DEFAULT 'Round',
-  theme_description TEXT,
-  color_preference TEXT,
-  message_on_cake TEXT,
-  is_eggless BOOLEAN DEFAULT TRUE,
-  reference_image TEXT,
-  approximate_budget NUMERIC,
-  additional_notes TEXT,
-  status TEXT NOT NULL DEFAULT 'enquiry_received',
-  quotation_amount NUMERIC,
-  admin_notes TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- 3. Customer Reviews Table
-CREATE TABLE IF NOT EXISTS public.reviews (
-  id TEXT PRIMARY KEY,
-  author TEXT NOT NULL,
-  rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
-  date TEXT,
-  text TEXT NOT NULL,
-  category TEXT DEFAULT 'Food',
-  verified_customer BOOLEAN DEFAULT FALSE,
-  owner_reply TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- 4. Customer Issues & Late Delivery Reports Table
-CREATE TABLE IF NOT EXISTS public.customer_issues (
-  id TEXT PRIMARY KEY,
-  order_number TEXT NOT NULL,
-  customer_phone TEXT NOT NULL,
-  customer_name TEXT NOT NULL,
-  issue_type TEXT NOT NULL,
-  description TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'open',
-  resolution_notes TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- 5. Products Table (Menu Items & Live Pricing)
+-- 1. PRODUCTS TABLE (AUTHORITATIVE MENU & REALTIME PRICING)
 CREATE TABLE IF NOT EXISTS public.products (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   category_id TEXT NOT NULL,
   category_name TEXT NOT NULL,
   description TEXT DEFAULT '',
-  price NUMERIC NOT NULL,
+  price NUMERIC NOT NULL DEFAULT 0,
   original_price NUMERIC,
   image TEXT NOT NULL,
   is_available BOOLEAN DEFAULT TRUE,
@@ -147,10 +26,87 @@ CREATE TABLE IF NOT EXISTS public.products (
   is_spicy BOOLEAN DEFAULT FALSE,
   prep_time_minutes INTEGER DEFAULT 20,
   customization_groups JSONB DEFAULT '[]'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 5b. Business Settings Table (Live Store Details, Master Open/Close, Logo, UPI, Contact)
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS original_price NUMERIC;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_available BOOLEAN DEFAULT TRUE;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_bestseller BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_eggless BOOLEAN DEFAULT TRUE;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_vegetarian BOOLEAN DEFAULT TRUE;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_spicy BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS prep_time_minutes INTEGER DEFAULT 20;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS customization_groups JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+CREATE INDEX IF NOT EXISTS idx_products_category ON public.products (category_id);
+CREATE INDEX IF NOT EXISTS idx_products_is_available ON public.products (is_available);
+
+ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "products_select_public" ON public.products;
+CREATE POLICY "products_select_public"
+  ON public.products
+  FOR SELECT
+  TO anon, authenticated
+  USING (true);
+
+DROP POLICY IF EXISTS "products_admin_modify" ON public.products;
+CREATE POLICY "products_admin_modify"
+  ON public.products
+  FOR ALL
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
+    )
+  );
+
+
+-- Seed Initial Menu Products
+INSERT INTO public.products (
+  id, name, category_id, category_name, description, price, original_price,
+  image, is_available, is_bestseller, is_eggless, is_vegetarian, is_spicy,
+  prep_time_minutes, customization_groups
+) VALUES
+  ('prod-cake-1', 'Eggless Black Forest Cake', 'cakes', 'Cakes & Pastries', 'Classic rich chocolate sponge layered with whipped fresh cream, dark cherries, and chocolate shavings. 100% Eggless.', 350, 400, 'https://images.unsplash.com/photo-1606890737304-57a1ca8a5b62?auto=format&fit=crop&w=700&q=80', TRUE, TRUE, TRUE, TRUE, FALSE, 30, '[{"name":"Cake Weight","type":"single","options":[{"name":"0.5 Kg","price":0},{"name":"1.0 Kg","price":320},{"name":"1.5 Kg","price":600}]},{"name":"Celebration Add-ons","type":"multiple","options":[{"name":"Birthday Candle & Knife Set","price":20},{"name":"Sparkler Candle","price":40},{"name":"Golden Birthday Tag","price":30}]}]'::jsonb),
+  ('prod-cake-2', 'Belgian Chocolate Truffle Cake', 'cakes', 'Cakes & Pastries', 'Silky smooth dark chocolate ganache draped over moist chocolate sponge. Decadent, glossy, and 100% eggless.', 450, 500, 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=700&q=80', TRUE, TRUE, TRUE, TRUE, FALSE, 30, '[{"name":"Cake Weight","type":"single","options":[{"name":"0.5 Kg","price":0},{"name":"1.0 Kg","price":400}]}]'::jsonb),
+  ('prod-cake-3', 'Fresh Pineapple Cream Cake', 'cakes', 'Cakes & Pastries', 'Light vanilla sponge enriched with chopped juicy pineapples and whipped fresh dairy cream. Gentle and refreshing.', 320, NULL, 'https://images.unsplash.com/photo-1565958011703-44f9829ba187?auto=format&fit=crop&w=700&q=80', TRUE, FALSE, TRUE, TRUE, FALSE, 25, '[{"name":"Cake Weight","type":"single","options":[{"name":"0.5 Kg","price":0},{"name":"1.0 Kg","price":300}]}]'::jsonb),
+  ('prod-cake-4', 'Red Velvet Cream Cheese Pastry', 'cakes', 'Cakes & Pastries', 'Individual velvety crimson slice layered with creamy cheese frosting and red velvet crumb dusting.', 85, NULL, 'https://images.unsplash.com/photo-1616031037011-0872951336c1?auto=format&fit=crop&w=700&q=80', TRUE, FALSE, TRUE, TRUE, FALSE, 10, '[]'::jsonb),
+  ('prod-cake-5', 'Hot Choco Lava Cupcake', 'cakes', 'Cakes & Pastries', 'Warm cocoa muffin with a molten chocolate core that flows with the first bite.', 70, NULL, 'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?auto=format&fit=crop&w=700&q=80', TRUE, TRUE, TRUE, TRUE, FALSE, 15, '[]'::jsonb),
+  ('prod-cake-6', 'Artisan Butter Cookies Box (250g)', 'cakes', 'Cakes & Pastries', 'Fresh bakery baked crisp butter cookies with a melt-in-mouth crumb. Perfect for chai time.', 130, NULL, 'https://images.unsplash.com/photo-1499636136210-6f4ee915583e?auto=format&fit=crop&w=700&q=80', TRUE, FALSE, TRUE, TRUE, FALSE, 5, '[]'::jsonb),
+  ('prod-pasta-1', 'Creamy White Sauce Penne Pasta', 'pasta', 'Pasta & Italian', 'Signature bistro white sauce penne cooked with rich garlic cream, sweet corn, crunchy bell peppers, and oregano herbs.', 190, NULL, 'https://images.unsplash.com/photo-1621996346565-e3d5d6281699?auto=format&fit=crop&w=700&q=80', TRUE, TRUE, TRUE, TRUE, FALSE, 20, '[{"name":"Cheese & Spice","type":"multiple","options":[{"name":"Extra Mozzarella Cheese","price":40},{"name":"Spicy Chilli Flakes Kick","price":0},{"name":"Garlic Bread Slices (2 pcs)","price":45}]}]'::jsonb),
+  ('prod-pasta-2', 'Tangy Red Sauce Arrabiata Pasta', 'pasta', 'Pasta & Italian', 'Spicy simmered Italian tomato sauce with crushed garlic, fresh basil hints, black olives, and bell peppers.', 180, NULL, 'https://images.unsplash.com/photo-1551183053-bf91a1d81141?auto=format&fit=crop&w=700&q=80', TRUE, FALSE, TRUE, TRUE, TRUE, 20, '[{"name":"Add-ons","type":"multiple","options":[{"name":"Extra Cheese Topping","price":40},{"name":"Garlic Bread Slices (2 pcs)","price":45}]}]'::jsonb),
+  ('prod-pasta-3', 'Pink Mixed Sauce Fusion Pasta', 'pasta', 'Pasta & Italian', 'The best of both worlds: creamy bechamel combined with tangy pomodoro sauce, tossed with sweet corn and paneer cubes.', 210, NULL, 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=700&q=80', TRUE, TRUE, TRUE, TRUE, FALSE, 20, '[]'::jsonb),
+  ('prod-pasta-4', 'Toasted Cheesy Garlic Bread (4 pcs)', 'pasta', 'Pasta & Italian', 'Crisp fresh baguette slices brushed with fragrant garlic butter and topped with bubbling melted mozzarella cheese.', 120, NULL, 'https://images.unsplash.com/photo-1619535860434-ba1d8fa12536?auto=format&fit=crop&w=700&q=80', TRUE, FALSE, TRUE, TRUE, FALSE, 15, '[]'::jsonb),
+  ('prod-pizza-1', 'Punjabi Bistro Special Paneer Pizza', 'pizza', 'Handcrafted Pizza', 'Hand-tossed crust with aromatic spiced pizza sauce, marinated soft paneer cubes, crisp onions, green capsicum, and 100% mozzarella.', 260, NULL, 'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=700&q=80', TRUE, TRUE, TRUE, TRUE, FALSE, 25, '[{"name":"Crust & Cheese","type":"single","options":[{"name":"Regular Pan Crust (8 inch)","price":0},{"name":"Medium Pan Crust (10 inch)","price":140},{"name":"Cheese Burst Base (8 inch)","price":60}]},{"name":"Extra Toppings","type":"multiple","options":[{"name":"Extra Paneer Cubes","price":45},{"name":"Extra Cheese","price":50},{"name":"Spicy Jalapeños","price":30}]}]'::jsonb),
+  ('prod-pizza-2', 'Farmhouse Garden Pizza', 'pizza', 'Handcrafted Pizza', 'Loaded with tender sweet corn, fresh mushrooms, diced capsicum, juicy tomatoes, and melted mozzarella.', 240, NULL, 'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?auto=format&fit=crop&w=700&q=80', TRUE, FALSE, TRUE, TRUE, FALSE, 25, '[{"name":"Size","type":"single","options":[{"name":"Regular (8 inch)","price":0},{"name":"Medium (10 inch)","price":130}]}]'::jsonb),
+  ('prod-pizza-3', 'Classic Margherita Pizza', 'pizza', 'Handcrafted Pizza', 'Simple authentic delight with rich tomato basil sauce, double mozzarella cheese, and Italian oregano dusting.', 190, NULL, 'https://images.unsplash.com/photo-1604382354936-07c5d9983bd3?auto=format&fit=crop&w=700&q=80', TRUE, FALSE, TRUE, TRUE, FALSE, 20, '[]'::jsonb),
+  ('prod-pizza-4', 'Spicy Mexican Jalapeño Pizza', 'pizza', 'Handcrafted Pizza', 'Fiery Mexican salsa spread, spicy jalapeños, sweet golden corn, red paprika, and stretchy melted cheese.', 250, NULL, 'https://images.unsplash.com/photo-1593560708920-61dd98c46a4e?auto=format&fit=crop&w=700&q=80', TRUE, FALSE, TRUE, TRUE, TRUE, 25, '[]'::jsonb),
+  ('prod-burger-1', 'Crispy Veggie Crunch Burger', 'burgers', 'Burgers & Wraps', 'Crispy spiced vegetable patty nestled between soft toasted sesame buns, crisp lettuce, tomato slices, and house burger spread.', 95, NULL, 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=700&q=80', TRUE, TRUE, TRUE, TRUE, FALSE, 15, '[{"name":"Upgrades","type":"multiple","options":[{"name":"Add Cheese Slice","price":25},{"name":"Make It Double Patty","price":40},{"name":"Add Small Salted Fries","price":45}]}]'::jsonb),
+  ('prod-burger-2', 'Spicy Paneer Tikka Burger', 'burgers', 'Burgers & Wraps', 'Charred paneer slice marinated in roasted tandoori spices, topped with mint chutney mayo and onion rings.', 135, NULL, 'https://images.unsplash.com/photo-1586190848861-99aa4a171e90?auto=format&fit=crop&w=700&q=80', TRUE, FALSE, TRUE, TRUE, TRUE, 15, '[]'::jsonb),
+  ('prod-wrap-1', 'Spicy Mexican Bean & Cheese Wrap', 'burgers', 'Burgers & Wraps', 'Grilled whole wheat tortilla packed with Mexican spiced filling, fresh salsa, crunchy bell peppers, and chipotle cheese sauce.', 145, NULL, 'https://images.unsplash.com/photo-1626700051175-6818013e1d4f?auto=format&fit=crop&w=700&q=80', TRUE, TRUE, TRUE, TRUE, TRUE, 15, '[]'::jsonb),
+  ('prod-wrap-2', 'Tandoori Paneer Roll Wrap', 'burgers', 'Burgers & Wraps', 'Flaky warm paratha wrap stuffed with roasted paneer tikka, pickled sliced onions, and smoky Punjabi bistro dip.', 150, NULL, 'https://images.unsplash.com/photo-1648787989447-06bdfd1891b0?auto=format&fit=crop&w=700&q=80', TRUE, FALSE, TRUE, TRUE, FALSE, 15, '[]'::jsonb),
+  ('prod-sand-1', 'Jumbo Cheesy Grilled Sandwich', 'sandwiches', 'Grilled Sandwiches', 'Triple-decker bread toasted golden-crisp on the grill with butter, stuffed with sliced vegetables, green chutney, and double cheese.', 130, NULL, 'https://images.unsplash.com/photo-1528735602780-2552fd46c7af?auto=format&fit=crop&w=700&q=80', TRUE, TRUE, TRUE, TRUE, FALSE, 15, '[]'::jsonb),
+  ('prod-sand-2', 'Paneer Corn Club Sandwich', 'sandwiches', 'Grilled Sandwiches', 'Wholesome grilled club sandwich packed with seasoned paneer bhurji, sweet golden corn, capsicum, and house bistro spread.', 145, NULL, 'https://images.unsplash.com/photo-1553909489-cd47e0907980?auto=format&fit=crop&w=700&q=80', TRUE, FALSE, TRUE, TRUE, FALSE, 15, '[]'::jsonb),
+  ('prod-sand-3', 'Coleslaw Mayo Cold Sandwich', 'sandwiches', 'Grilled Sandwiches', 'Chilled sandwich filled with shredded crisp cabbage, carrots, sweet corn, and creamy eggless mayonnaise spread.', 90, NULL, 'https://images.unsplash.com/photo-1481070414801-51fd732d7184?auto=format&fit=crop&w=700&q=80', TRUE, FALSE, TRUE, TRUE, FALSE, 10, '[]'::jsonb),
+  ('prod-fries-1', 'Peri Peri Crinkle Cut Fries', 'fries', 'Fries & Quick Bites', 'Deep-fried golden crinkle potatoes tossed in hot & tangy African peri peri spice blend. Served with bistro dip.', 95, NULL, 'https://images.unsplash.com/photo-1573080496219-bb080dd4f877?auto=format&fit=crop&w=700&q=80', TRUE, TRUE, TRUE, TRUE, TRUE, 10, '[]'::jsonb),
+  ('prod-fries-2', 'Loaded Melted Cheese Fries', 'fries', 'Fries & Quick Bites', 'Hot crisp fries drenched in molten cheddar cheese sauce and garnished with sliced spicy jalapeños.', 130, NULL, 'https://images.unsplash.com/photo-1585109649139-366815a0d713?auto=format&fit=crop&w=700&q=80', TRUE, FALSE, TRUE, TRUE, FALSE, 12, '[]'::jsonb),
+  ('prod-fries-3', 'Crispy Veg Nuggets (8 pcs)', 'fries', 'Fries & Quick Bites', 'Crunchy battered vegetable bites with a savory herbal seasoning. Served with tomato salsa dip.', 90, NULL, 'https://images.unsplash.com/photo-1562967914-608f82629710?auto=format&fit=crop&w=700&q=80', TRUE, FALSE, TRUE, TRUE, FALSE, 12, '[]'::jsonb),
+  ('prod-bev-1', 'Chilled Fruit Beer (Non-Alcoholic)', 'beverages', 'Drinks & Fruit Beer', 'Dharamkot’s beloved bubbly malted fruit beverage served ice-cold. Refreshing, sweet, and effervescent.', 60, NULL, 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?auto=format&fit=crop&w=700&q=80', TRUE, TRUE, TRUE, TRUE, FALSE, 5, '[]'::jsonb),
+  ('prod-bev-2', 'Classic Thick Cold Coffee', 'beverages', 'Drinks & Fruit Beer', 'Blended creamy chilled coffee topped with chocolate syrup drizzle and a scoop of vanilla ice cream.', 110, NULL, 'https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?auto=format&fit=crop&w=700&q=80', TRUE, FALSE, TRUE, TRUE, FALSE, 5, '[]'::jsonb),
+  ('prod-bev-3', 'Fresh Lime Mint Soda (Sweet & Salt)', 'beverages', 'Drinks & Fruit Beer', 'Zesty freshly squeezed lemon juice with garden mint leaves and sparkling soda.', 70, NULL, 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?auto=format&fit=crop&w=700&q=80', TRUE, FALSE, TRUE, TRUE, FALSE, 5, '[]'::jsonb),
+  ('prod-bev-4', 'Hot Hazelnut Bistro Cappuccino', 'beverages', 'Drinks & Fruit Beer', 'Freshly brewed espresso topped with velvety steamed milk foam and subtle hazelnut essence.', 80, NULL, 'https://images.unsplash.com/photo-1534778101976-62847782c213?auto=format&fit=crop&w=700&q=80', TRUE, FALSE, TRUE, TRUE, FALSE, 5, '[]'::jsonb)
+ON CONFLICT (id) DO NOTHING;
+
+
+-- 2. BUSINESS SETTINGS TABLE (STORE DETAILS, UPI, TIMINGS, LOGO)
 CREATE TABLE IF NOT EXISTS public.business_settings (
   id TEXT PRIMARY KEY DEFAULT 'default',
   name TEXT NOT NULL DEFAULT 'Punjabi Bistro & Bakery',
@@ -173,7 +129,49 @@ CREATE TABLE IF NOT EXISTS public.business_settings (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 5c. Delivery Zones Table
+ALTER TABLE public.business_settings ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "settings_select_public" ON public.business_settings;
+CREATE POLICY "settings_select_public"
+  ON public.business_settings
+  FOR SELECT
+  TO anon, authenticated
+  USING (true);
+
+DROP POLICY IF EXISTS "settings_admin_modify" ON public.business_settings;
+CREATE POLICY "settings_admin_modify"
+  ON public.business_settings
+  FOR ALL
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email'))
+  );
+
+-- Seed default settings record if not present
+INSERT INTO public.business_settings (
+  id, name, logo_url, address, landmark, phone, whatsapp,
+  is_open_manual, opening_time, closing_time, weekly_off,
+  upi_id, upi_merchant_name, announcement_text, show_announcement,
+  max_orders_per_slot, default_prep_minutes
+) VALUES (
+  'default', 'Punjabi Bistro & Bakery', NULL,
+  'Near Udham Singh Chowk, Dharamkot, Punjab 142042', 'Near Udham Singh Chowk',
+  '098562 04951', '919856204951',
+  TRUE, '10:00', '22:00', 'None (Open All 7 Days)',
+  'punjabibistro@upi', 'Punjabi Bistro and Bakery',
+  'Fresh batch of eggless cakes and pizza ready today! Book before 9:30 PM for same-day delivery.',
+  TRUE, 6, 25
+)
+ON CONFLICT (id) DO NOTHING;
+
+
+-- 3. DELIVERY ZONES TABLE
 CREATE TABLE IF NOT EXISTS public.delivery_zones (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -183,600 +181,187 @@ CREATE TABLE IF NOT EXISTS public.delivery_zones (
   estimated_time TEXT DEFAULT '30-45 mins',
   description TEXT,
   is_active BOOLEAN DEFAULT TRUE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- 6. Dedicated Authorized Administrators Registry (Production Auth)
-CREATE TABLE IF NOT EXISTS public.admin_users (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email TEXT UNIQUE NOT NULL,
-  role TEXT NOT NULL DEFAULT 'owner',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-ALTER TABLE public.admin_users ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "Allow anon and authenticated to check admin status" ON public.admin_users;
-CREATE POLICY "Allow anon and authenticated to check admin status"
-  ON public.admin_users
-  FOR SELECT
-  TO anon, authenticated
-  USING (true);
-
--- 7. Legacy Admin Keys Table (Maintained for backward compatibility)
-CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
-
-CREATE TABLE IF NOT EXISTS public.admin_keys (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  username TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  security_key_hash TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Enable Row Level Security on admin_keys
-ALTER TABLE public.admin_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.delivery_zones ENABLE ROW LEVEL SECURITY;
 
--- CRITICAL: Block all direct client/public access to admin_keys
-REVOKE ALL ON TABLE public.admin_keys FROM anon, authenticated, public;
+DROP POLICY IF EXISTS "zones_select_public" ON public.delivery_zones;
+CREATE POLICY "zones_select_public"
+  ON public.delivery_zones
+  FOR SELECT
+  TO anon, authenticated
+  USING (true);
 
--- Automatic Hashing Trigger:
--- If an admin edits password_hash or security_key_hash in Supabase Table Editor using plaintext,
--- this trigger automatically converts it to a secure bcrypt hash before saving to the table!
--- FIX: SET search_path = public, extensions, pg_temp ensures extensions.gen_salt and extensions.crypt are found
-CREATE OR REPLACE FUNCTION public.hash_admin_keys_trigger()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, extensions, pg_temp
-AS $$
-BEGIN
-  -- If password_hash is not already a bcrypt ($2a$, $2b$) or pbkdf2 hash, hash it with bcrypt
-  IF NEW.password_hash IS NOT NULL AND NEW.password_hash !~ '^\$2[ab]\$' AND NEW.password_hash !~ '^pbkdf2\$' THEN
-    NEW.password_hash := extensions.crypt(NEW.password_hash, extensions.gen_salt('bf', 10));
-  END IF;
+DROP POLICY IF EXISTS "zones_admin_modify" ON public.delivery_zones;
+CREATE POLICY "zones_admin_modify"
+  ON public.delivery_zones
+  FOR ALL
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
+    )
+  );
 
-  -- If security_key_hash is not already a bcrypt or pbkdf2 hash, hash it with bcrypt
-  IF NEW.security_key_hash IS NOT NULL AND NEW.security_key_hash !~ '^\$2[ab]\$' AND NEW.security_key_hash !~ '^pbkdf2\$' THEN
-    NEW.security_key_hash := extensions.crypt(NEW.security_key_hash, extensions.gen_salt('bf', 10));
-  END IF;
+INSERT INTO public.delivery_zones (id, name, min_order, delivery_fee, free_delivery_above, estimated_time, description, is_active)
+VALUES
+  ('zone-1', 'Dharamkot Town Center', 150, 20, 399, '25-35 mins', 'Within Dharamkot main market and 2km radius', true),
+  ('zone-2', 'Outer Dharamkot & Bypass', 250, 35, 499, '35-45 mins', 'Bypass area and surrounding residential colonies', true),
+  ('zone-3', 'Nearby Villages (within 6km)', 400, 50, 799, '45-60 mins', 'Jalalabad East, Kot Sadar Khan & rural outskirts', true)
+ON CONFLICT (id) DO NOTHING;
 
-  NEW.updated_at := NOW();
-  RETURN NEW;
-END;
-$$;
 
-DROP TRIGGER IF EXISTS trg_hash_admin_keys ON public.admin_keys;
-CREATE TRIGGER trg_hash_admin_keys
-BEFORE INSERT OR UPDATE ON public.admin_keys
-FOR EACH ROW
-EXECUTE FUNCTION public.hash_admin_keys_trigger();
-
--- Helper function: Change credentials directly from Supabase SQL Editor
--- Usage: SELECT set_admin_credentials('admin', 'YourNewPassword123', 'YourNewSecurityKey123');
-CREATE OR REPLACE FUNCTION public.set_admin_credentials(
-  p_username TEXT,
-  p_new_password TEXT,
-  p_new_security_key TEXT
-)
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, extensions, pg_temp
-AS $$
-DECLARE
-  v_user TEXT := lower(trim(p_username));
-  v_pass_hash TEXT;
-  v_key_hash TEXT;
-BEGIN
-  IF length(trim(p_new_password)) < 6 THEN
-    RAISE EXCEPTION 'Password must be at least 6 characters.';
-  END IF;
-  IF length(trim(p_new_security_key)) < 4 THEN
-    RAISE EXCEPTION 'Security key must be at least 4 characters.';
-  END IF;
-
-  v_pass_hash := extensions.crypt(trim(p_new_password), extensions.gen_salt('bf', 10));
-  v_key_hash := extensions.crypt(trim(p_new_security_key), extensions.gen_salt('bf', 10));
-
-  INSERT INTO public.admin_keys (username, password_hash, security_key_hash, updated_at)
-  VALUES (v_user, v_pass_hash, v_key_hash, NOW())
-  ON CONFLICT (username)
-  DO UPDATE SET
-    password_hash = EXCLUDED.password_hash,
-    security_key_hash = EXCLUDED.security_key_hash,
-    updated_at = NOW();
-
-  RETURN jsonb_build_object('success', true, 'username', v_user, 'updated_at', NOW());
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.set_admin_credentials(TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
-
--- Dedicated One-Time Admin Recovery Tokens Table
-CREATE TABLE IF NOT EXISTS public.admin_recovery (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  token TEXT UNIQUE NOT NULL,
+-- 4. DYNAMIC COUPONS TABLE
+CREATE TABLE IF NOT EXISTS public.coupons (
+  id TEXT PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,
+  title TEXT NOT NULL,
+  subtitle TEXT,
+  discount_type TEXT NOT NULL CHECK (discount_type IN ('flat', 'percentage')),
+  discount_value NUMERIC NOT NULL,
+  max_discount NUMERIC,
+  min_order NUMERIC DEFAULT 0,
+  is_active BOOLEAN DEFAULT TRUE,
+  badge TEXT,
+  expiry_date TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 minutes',
-  used BOOLEAN NOT NULL DEFAULT FALSE
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-ALTER TABLE public.admin_recovery ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON TABLE public.admin_recovery FROM anon, authenticated, public;
+ALTER TABLE public.coupons ENABLE ROW LEVEL SECURITY;
 
--- Function: Generate a single-use Emergency Admin Recovery Token from Supabase SQL Editor
--- Usage: SELECT create_admin_recovery_token();
-CREATE OR REPLACE FUNCTION public.create_admin_recovery_token()
-RETURNS TEXT
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, extensions, pg_temp
-AS $$
-DECLARE
-  v_token TEXT;
-BEGIN
-  v_token := 'REC-' || upper(encode(extensions.gen_random_bytes(16), 'hex'));
-  INSERT INTO public.admin_recovery (token, expires_at)
-  VALUES (v_token, NOW() + INTERVAL '30 minutes');
-  RETURN v_token;
-END;
-$$;
+DROP POLICY IF EXISTS "coupons_select_public" ON public.coupons;
+CREATE POLICY "coupons_select_public"
+  ON public.coupons
+  FOR SELECT
+  TO anon, authenticated
+  USING (true);
 
-REVOKE ALL ON FUNCTION public.create_admin_recovery_token() FROM PUBLIC, anon, authenticated;
-
--- Function: Verify and consume emergency recovery token
-CREATE OR REPLACE FUNCTION public.admin_verify_and_consume_recovery_token(p_token TEXT)
-RETURNS BOOLEAN
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, extensions, pg_temp
-AS $$
-DECLARE
-  v_rec RECORD;
-BEGIN
-  SELECT id INTO v_rec
-  FROM public.admin_recovery
-  WHERE token = trim(p_token)
-    AND used = FALSE
-    AND expires_at > NOW();
-
-  IF v_rec IS NULL THEN
-    RETURN FALSE;
-  END IF;
-
-  UPDATE public.admin_recovery
-  SET used = TRUE
-  WHERE id = v_rec.id;
-
-  RETURN TRUE;
-END;
-$$;
-
-GRANT EXECUTE ON FUNCTION public.admin_verify_and_consume_recovery_token(TEXT) TO anon, authenticated;
-
--- Server verification endpoint Step 1 (Returns boolean only, never credentials or hashes)
-CREATE OR REPLACE FUNCTION public.auth_verify_admin_step1(
-  p_username TEXT,
-  p_password_attempt TEXT
-)
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, extensions, pg_temp
-AS $$
-DECLARE
-  v_rec RECORD;
-  v_valid BOOLEAN := FALSE;
-BEGIN
-  SELECT id, username, password_hash
-  INTO v_rec
-  FROM public.admin_keys
-  WHERE lower(username) = lower(trim(p_username))
-  LIMIT 1;
-
-  IF v_rec IS NULL THEN
-    RETURN jsonb_build_object('success', false, 'error', 'Invalid credentials');
-  END IF;
-
-  IF v_rec.password_hash ~ '^\$2[ab]\$' THEN
-    v_valid := (extensions.crypt(p_password_attempt, v_rec.password_hash) = v_rec.password_hash);
-  END IF;
-
-  IF v_valid THEN
-    RETURN jsonb_build_object('success', true, 'username', v_rec.username);
-  ELSE
-    RETURN jsonb_build_object('success', false, 'error', 'Invalid credentials');
-  END IF;
-END;
-$$;
-
--- Server verification endpoint Step 2 (Returns boolean only, never credentials or hashes)
-CREATE OR REPLACE FUNCTION public.auth_verify_admin_step2(
-  p_username TEXT,
-  p_security_key_attempt TEXT
-)
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, extensions, pg_temp
-AS $$
-DECLARE
-  v_rec RECORD;
-  v_valid BOOLEAN := FALSE;
-BEGIN
-  SELECT id, username, security_key_hash
-  INTO v_rec
-  FROM public.admin_keys
-  WHERE lower(username) = lower(trim(p_username))
-  LIMIT 1;
-
-  IF v_rec IS NULL THEN
-    RETURN jsonb_build_object('success', false, 'error', 'Invalid credentials');
-  END IF;
-
-  IF v_rec.security_key_hash ~ '^\$2[ab]\$' THEN
-    v_valid := (extensions.crypt(p_security_key_attempt, v_rec.security_key_hash) = v_rec.security_key_hash);
-  END IF;
-
-  IF v_valid THEN
-    RETURN jsonb_build_object('success', true, 'username', v_rec.username);
-  ELSE
-    RETURN jsonb_build_object('success', false, 'error', 'Invalid credentials');
-  END IF;
-END;
-$$;
-
-GRANT EXECUTE ON FUNCTION public.auth_verify_admin_step1(TEXT, TEXT) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.auth_verify_admin_step2(TEXT, TEXT) TO anon, authenticated;
-
--- 7a. Secure Order Lookup by Cryptographic Tracking Token
-CREATE OR REPLACE FUNCTION public.get_order_by_tracking_token(p_token TEXT)
-RETURNS TABLE (
-  id TEXT,
-  order_number TEXT,
-  tracking_token TEXT,
-  customer_name TEXT,
-  order_type TEXT,
-  delivery_address TEXT,
-  landmark TEXT,
-  table_number TEXT,
-  time_slot TEXT,
-  scheduled_date TEXT,
-  items JSONB,
-  subtotal NUMERIC,
-  delivery_fee NUMERIC,
-  discount NUMERIC,
-  coupon_code TEXT,
-  total NUMERIC,
-  payment_method TEXT,
-  payment_status TEXT,
-  status TEXT,
-  created_at TIMESTAMPTZ,
-  estimated_delivery_time TEXT,
-  delay_minutes INTEGER,
-  delay_message TEXT
-)
-LANGUAGE plpgsql
-SECURITY DEFINER
-STABLE
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-  v_token TEXT;
-BEGIN
-  v_token := trim(p_token);
-  IF v_token IS NULL OR length(v_token) < 16 THEN
-    RETURN;
-  END IF;
-
-  RETURN QUERY
-  SELECT
-    o.id,
-    o.order_number,
-    o.tracking_token,
-    o.customer_name,
-    o.order_type,
-    o.delivery_address,
-    o.landmark,
-    o.table_number,
-    o.time_slot,
-    o.scheduled_date,
-    o.items,
-    o.subtotal,
-    o.delivery_fee,
-    o.discount,
-    o.coupon_code,
-    o.total,
-    o.payment_method,
-    o.payment_status,
-    o.status,
-    o.created_at,
-    o.estimated_delivery_time,
-    o.delay_minutes,
-    o.delay_message
-  FROM public.orders o
-  WHERE o.tracking_token = v_token
-  LIMIT 1;
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.get_order_by_tracking_token(TEXT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.get_order_by_tracking_token(TEXT) TO anon, authenticated;
-
--- 7b. Secure Order Lookup by Order Number AND Exact Normalized Phone Verification
-CREATE OR REPLACE FUNCTION public.get_order_by_number_and_phone(p_order_number TEXT, p_phone TEXT)
-RETURNS TABLE (
-  id TEXT,
-  order_number TEXT,
-  tracking_token TEXT,
-  customer_name TEXT,
-  order_type TEXT,
-  delivery_address TEXT,
-  landmark TEXT,
-  table_number TEXT,
-  time_slot TEXT,
-  scheduled_date TEXT,
-  items JSONB,
-  subtotal NUMERIC,
-  delivery_fee NUMERIC,
-  discount NUMERIC,
-  coupon_code TEXT,
-  total NUMERIC,
-  payment_method TEXT,
-  payment_status TEXT,
-  status TEXT,
-  created_at TIMESTAMPTZ,
-  estimated_delivery_time TEXT,
-  delay_minutes INTEGER,
-  delay_message TEXT
-)
-LANGUAGE plpgsql
-SECURITY DEFINER
-STABLE
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-  v_clean_num TEXT;
-  v_clean_phone TEXT;
-BEGIN
-  v_clean_num := upper(trim(p_order_number));
-  IF v_clean_num ~ '^PB[0-9]+$' THEN
-    v_clean_num := 'PB-' || substring(v_clean_num FROM 3);
-  END IF;
-
-  v_clean_phone := regexp_replace(p_phone, '\D', '', 'g');
-  IF length(v_clean_phone) = 12 AND v_clean_phone LIKE '91%' THEN
-    v_clean_phone := substring(v_clean_phone FROM 3);
-  ELSIF length(v_clean_phone) = 11 AND v_clean_phone LIKE '0%' THEN
-    v_clean_phone := substring(v_clean_phone FROM 2);
-  END IF;
-
-  -- Require exact 10-digit mobile number and valid order identifier
-  IF v_clean_num = '' OR length(v_clean_phone) <> 10 THEN
-    RETURN;
-  END IF;
-
-  RETURN QUERY
-  SELECT
-    o.id,
-    o.order_number,
-    o.tracking_token,
-    o.customer_name,
-    o.order_type,
-    o.delivery_address,
-    o.landmark,
-    o.table_number,
-    o.time_slot,
-    o.scheduled_date,
-    o.items,
-    o.subtotal,
-    o.delivery_fee,
-    o.discount,
-    o.coupon_code,
-    o.total,
-    o.payment_method,
-    o.payment_status,
-    o.status,
-    o.created_at,
-    o.estimated_delivery_time,
-    o.delay_minutes,
-    o.delay_message
-  FROM public.orders o
-  WHERE (upper(trim(o.order_number)) = v_clean_num OR upper(trim(o.id)) = v_clean_num)
-    AND (
-      CASE 
-        WHEN length(regexp_replace(o.customer_phone, '\D', '', 'g')) = 12 AND regexp_replace(o.customer_phone, '\D', '', 'g') LIKE '91%'
-          THEN substring(regexp_replace(o.customer_phone, '\D', '', 'g') FROM 3)
-        WHEN length(regexp_replace(o.customer_phone, '\D', '', 'g')) = 11 AND regexp_replace(o.customer_phone, '\D', '', 'g') LIKE '0%'
-          THEN substring(regexp_replace(o.customer_phone, '\D', '', 'g') FROM 2)
-        ELSE regexp_replace(o.customer_phone, '\D', '', 'g')
-      END = v_clean_phone
+DROP POLICY IF EXISTS "coupons_admin_modify" ON public.coupons;
+CREATE POLICY "coupons_admin_modify"
+  ON public.coupons
+  FOR ALL
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
     )
-  LIMIT 1;
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.get_order_by_number_and_phone(TEXT, TEXT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.get_order_by_number_and_phone(TEXT, TEXT) TO anon, authenticated;
-
--- Enable Row Level Security (RLS) on all tables
-ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.customer_profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.custom_cake_enquiries ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.customer_issues ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.admin_credentials ENABLE ROW LEVEL SECURITY;
-
--- Clean up existing policies to ensure idempotent migration
-DO $$
-DECLARE
-  r RECORD;
-BEGIN
-  FOR r IN (
-    SELECT policyname, tablename 
-    FROM pg_policies 
-    WHERE schemaname = 'public' 
-      AND tablename IN ('orders', 'customer_profiles', 'admin_credentials', 'custom_cake_enquiries', 'customer_issues', 'reviews', 'products')
-  ) LOOP
-    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', r.policyname, r.tablename);
-  END LOOP;
-END $$;
-
--- RLS: Orders Table
--- STRICT: Only authenticated customers can place orders; anonymous orders are strictly blocked.
--- The order's user_id MUST match auth.uid(), preventing account spoofing.
-CREATE POLICY "orders_authenticated_insert"
-  ON public.orders
-  FOR INSERT TO authenticated
-  WITH CHECK (
-    auth.uid() IS NOT NULL
-    AND user_id = auth.uid()
-    AND status = 'new'
-    AND (delay_minutes IS NULL OR delay_minutes = 0)
-    AND (delay_message IS NULL OR trim(delay_message) = '')
-    AND (payment_status IS NULL OR payment_status IN ('pending', 'paid'))
-    AND total >= 0
-    AND length(trim(customer_name)) > 0
-    AND length(trim(customer_phone)) > 0
-  );
-
--- Customers can only SELECT their own authenticated orders
-CREATE POLICY "orders_authenticated_select_own"
-  ON public.orders
-  FOR SELECT TO authenticated
-  USING (
-    auth.uid() IS NOT NULL
-    AND user_id = auth.uid()
-  );
-
--- RLS: Customer Profiles Table
--- Customers can only view, insert, or update their own profile linked to auth.uid()
-CREATE POLICY "customer_profiles_select_own"
-  ON public.customer_profiles
-  FOR SELECT TO authenticated
-  USING (
-    auth.uid() IS NOT NULL
-    AND user_id = auth.uid()
-  );
-
-CREATE POLICY "customer_profiles_insert_own"
-  ON public.customer_profiles
-  FOR INSERT TO authenticated
-  WITH CHECK (
-    auth.uid() IS NOT NULL
-    AND user_id = auth.uid()
-  );
-
-CREATE POLICY "customer_profiles_update_own"
-  ON public.customer_profiles
-  FOR UPDATE TO authenticated
-  USING (
-    auth.uid() IS NOT NULL
-    AND user_id = auth.uid()
   )
   WITH CHECK (
-    auth.uid() IS NOT NULL
-    AND user_id = auth.uid()
+    EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
+    )
   );
 
--- Automatic Google Account Profile Synchronization Trigger
--- When a user authenticates via Google for the first time or updates metadata,
--- automatically upsert their record into customer_profiles without creating duplicates.
-CREATE OR REPLACE FUNCTION public.handle_new_customer()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-BEGIN
-  INSERT INTO public.customer_profiles (id, user_id, email, full_name, avatar_url)
-  VALUES (
-    NEW.id,
-    NEW.id,
-    NEW.email,
-    COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
-    NEW.raw_user_meta_data->>'avatar_url'
+INSERT INTO public.coupons (id, code, title, subtitle, discount_type, discount_value, max_discount, min_order, is_active, badge)
+VALUES
+  ('coupon-1', 'BISTRO100', '₹100 OFF', 'Flat ₹100 off on gourmet cakes above ₹599', 'flat', 100, 100, 599, true, 'BEST VALUE'),
+  ('coupon-2', 'WELCOME10', '10% OFF', 'Enjoy 10% off your entire order above ₹299', 'percentage', 10, 150, 299, true, 'POPULAR'),
+  ('coupon-3', 'FREEDEL', 'FREE DELIVERY', 'Free delivery on all orders above ₹499', 'flat', 35, 50, 499, true, 'FREE SHIPPING')
+ON CONFLICT (id) DO NOTHING;
+
+
+-- 5. CATEGORIES TABLE
+CREATE TABLE IF NOT EXISTS public.categories (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  icon TEXT,
+  display_order INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "categories_select_public" ON public.categories;
+CREATE POLICY "categories_select_public"
+  ON public.categories
+  FOR SELECT
+  TO anon, authenticated
+  USING (true);
+
+DROP POLICY IF EXISTS "categories_admin_modify" ON public.categories;
+CREATE POLICY "categories_admin_modify"
+  ON public.categories
+  FOR ALL
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
+    )
   )
-  ON CONFLICT (id) DO UPDATE SET
-    user_id = EXCLUDED.user_id,
-    email = EXCLUDED.email,
-    full_name = COALESCE(EXCLUDED.full_name, customer_profiles.full_name),
-    avatar_url = COALESCE(EXCLUDED.avatar_url, customer_profiles.avatar_url),
-    updated_at = NOW();
-  RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-CREATE TRIGGER on_auth_user_created
-  AFTER INSERT OR UPDATE ON auth.users
-  FOR EACH ROW EXECUTE FUNCTION public.handle_new_customer();
-
--- Direct selects on orders are restricted; customers use secure lookup RPCs
--- Server backend service role bypasses RLS for admin portal operations
-
--- RLS: Custom Cake Enquiries
-CREATE POLICY "cake_enquiries_public_insert"
-  ON public.custom_cake_enquiries
-  FOR INSERT TO anon, authenticated
   WITH CHECK (
-    status IN ('enquiry_received', 'new')
-    AND quotation_amount IS NULL
-    AND admin_notes IS NULL
-    AND length(trim(customer_name)) > 0
-    AND length(trim(customer_phone)) > 0
+    EXISTS (
+      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
+    )
   );
 
--- RLS: Customer Issues & Late Delivery Reports
-CREATE POLICY "issues_public_insert"
-  ON public.customer_issues
-  FOR INSERT TO anon, authenticated
-  WITH CHECK (
-    status = 'open'
-    AND resolution_notes IS NULL
-    AND length(trim(customer_name)) > 0
-    AND length(trim(customer_phone)) > 0
-    AND length(trim(description)) > 0
-  );
+INSERT INTO public.categories (id, name, icon, display_order)
+VALUES
+  ('all', 'All Items', 'Sparkles', 0),
+  ('cakes', 'Cakes & Bakery', 'Cake', 1),
+  ('pizzas', 'Woodfire Pizzas', 'Pizza', 2),
+  ('burgers', 'Burgers & Wraps', 'Sandwich', 3),
+  ('shakes', 'Shakes & Mocktails', 'GlassWater', 4),
+  ('snacks', 'Quick Bites', 'UtensilsCrossed', 5)
+ON CONFLICT (id) DO NOTHING;
 
--- RLS: Customer Reviews Table
--- Public can view approved customer reviews
-CREATE POLICY "reviews_public_select"
-  ON public.reviews
-  FOR SELECT TO anon, authenticated
-  USING (true);
 
--- Public can submit reviews, but cannot mark verified or add owner replies
-CREATE POLICY "reviews_public_insert"
-  ON public.reviews
-  FOR INSERT TO anon, authenticated
-  WITH CHECK (
-    (verified_customer IS NULL OR verified_customer = false)
-    AND (owner_reply IS NULL OR trim(owner_reply) = '')
-    AND rating >= 1 AND rating <= 5
-    AND length(trim(author)) > 0
-    AND length(trim(text)) > 0
-  );
-
--- RLS: Products Table
--- Public can view menu items
-CREATE POLICY "products_public_select"
-  ON public.products
-  FOR SELECT TO anon, authenticated
-  USING (true);
-
--- Storage: product-images bucket setup
+-- 6. STORAGE BUCKET: product-images
 INSERT INTO storage.buckets (id, name, public) 
 VALUES ('product-images', 'product-images', true)
 ON CONFLICT (id) DO UPDATE SET public = true;
 
-DROP POLICY IF EXISTS "Public Access product-images" ON storage.objects;
-CREATE POLICY "Public Access product-images" ON storage.objects
-  FOR SELECT USING (bucket_id = 'product-images');
+DROP POLICY IF EXISTS "product_images_public_view" ON storage.objects;
+CREATE POLICY "product_images_public_view"
+  ON storage.objects
+  FOR SELECT
+  USING (bucket_id = 'product-images');
 
--- Enable Realtime publication for live order and cake updates
-ALTER PUBLICATION supabase_realtime ADD TABLE public.orders;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.custom_cake_enquiries;
+DROP POLICY IF EXISTS "product_images_admin_insert" ON storage.objects;
+CREATE POLICY "product_images_admin_insert"
+  ON storage.objects
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    bucket_id = 'product-images'
+    AND EXISTS (SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email'))
+  );
+
+DROP POLICY IF EXISTS "product_images_admin_update" ON storage.objects;
+CREATE POLICY "product_images_admin_update"
+  ON storage.objects
+  FOR UPDATE
+  TO authenticated
+  USING (
+    bucket_id = 'product-images'
+    AND EXISTS (SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email'))
+  );
+
+DROP POLICY IF EXISTS "product_images_admin_delete" ON storage.objects;
+CREATE POLICY "product_images_admin_delete"
+  ON storage.objects
+  FOR DELETE
+  TO authenticated
+  USING (
+    bucket_id = 'product-images'
+    AND EXISTS (SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email'))
+  );
+
+
+-- 7. REALTIME REPLICATION FOR BUSINESS DATA
+DO $$
+BEGIN
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.products; EXCEPTION WHEN OTHERS THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.business_settings; EXCEPTION WHEN OTHERS THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.delivery_zones; EXCEPTION WHEN OTHERS THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.coupons; EXCEPTION WHEN OTHERS THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.categories; EXCEPTION WHEN OTHERS THEN NULL; END;
+END $$;
