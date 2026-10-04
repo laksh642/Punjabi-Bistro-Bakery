@@ -290,11 +290,11 @@ export const OrderSuccessAnimation: React.FC<OrderSuccessAnimationProps> = ({
 
             {isTextRevealed && !error && (
               <div className="mt-3.5 space-y-1 animate-pb-reveal">
-                <h3 className="font-serif text-2xl sm:text-[26px] font-bold text-emerald-950">
-                  Order Received!
+                <h3 className="font-serif text-2xl sm:text-[26px] font-extrabold text-emerald-950">
+                  Order Confirmed
                 </h3>
-                <p className="text-xs sm:text-sm text-emerald-800/90 max-w-xs mx-auto">
-                  We've received your order and will start preparing it shortly.
+                <p className="text-xs sm:text-sm text-stone-600 max-w-xs mx-auto">
+                  Your order has been received successfully.
                 </p>
               </div>
             )}
