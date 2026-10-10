@@ -2,25 +2,22 @@
   {
     "id": "zone-1",
     "name": "Dharamkot Main Town & Udham Singh Chowk",
-    "fee": 20,
-    "freeAbove": 299,
-    "estimatedMinutes": "25-35 mins",
+    "fee": 0,
+    "estimatedMinutes": "30-40 mins",
     "description": "Covers central Dharamkot within 2.5 km of Udham Singh Chowk."
   },
   {
     "id": "zone-2",
     "name": "Dharamkot Outskirts & Outer Link Roads",
-    "fee": 35,
-    "freeAbove": 449,
-    "estimatedMinutes": "35-45 mins",
+    "fee": 0,
+    "estimatedMinutes": "30-40 mins",
     "description": "Covers residential colonies and bypass areas (2.5 km to 5 km)."
   },
   {
     "id": "zone-3",
     "name": "Surrounding Villages & Rural Connectors",
-    "fee": 55,
-    "freeAbove": 699,
-    "estimatedMinutes": "45-60 mins",
+    "fee": 0,
+    "estimatedMinutes": "30-40 mins",
     "description": "Covers nearby village periphery (up to 8 km) with dedicated delivery."
   }
 ]

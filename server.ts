@@ -611,18 +611,36 @@ app.post('/api/admin/credentials/update', requireAdmin, async (req: Authenticate
 // ============================================================================
 
 /**
+ * Creates a Supabase client scoped to the caller's JWT token so PostgreSQL RLS
+ * policies (such as orders_admin_update) can evaluate auth.jwt() and verify the admin.
+ */
+function getScopedSupabaseClient(req: Request) {
+  const authHeader = req.headers.authorization;
+  const token = authHeader ? authHeader.replace(/^Bearer\s+/i, '').trim() : '';
+  if (token) {
+    return createClient(SUPABASE_URL, SUPABASE_KEY, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { persistSession: false },
+    });
+  }
+  return supabase;
+}
+
+/**
  * GET /api/admin/orders
  * Fetches all orders securely for authenticated administrators.
  */
-app.get('/api/admin/orders', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+app.get('/api/admin/orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { data, error } = await supabase
+    const db = getScopedSupabaseClient(req);
+    const { data, error } = await db
       .from('orders')
       .select('*')
       .order('created_at', { ascending: false });
 
     if (error) {
-      res.status(500).json({ error: 'Failed to retrieve orders from database' });
+      console.error('[Admin Orders] Database fetch error:', error.message);
+      res.status(500).json({ error: `Failed to retrieve orders from database: ${error.message}` });
       return;
     }
     res.json(data || []);
@@ -643,16 +661,19 @@ app.post('/api/admin/orders/status', requireAdmin, async (req: AuthenticatedRequ
   }
 
   try {
-    const { error } = await supabase
+    const db = getScopedSupabaseClient(req);
+    const { data, error } = await db
       .from('orders')
       .update({ status })
-      .or(`id.eq.${orderId},order_number.eq.${orderId}`);
+      .or(`id.eq.${orderId},order_number.eq.${orderId}`)
+      .select();
 
     if (error) {
-      res.status(500).json({ error: 'Failed to update order status' });
+      console.error('[Admin Orders Status] Database update error:', error.message);
+      res.status(500).json({ error: `Failed to update order status in database: ${error.message}` });
       return;
     }
-    res.json({ success: true });
+    res.json({ success: true, order: data?.[0] });
   } catch (err: unknown) {
     res.status(500).json({ error: 'Internal server error updating status' });
   }
@@ -670,19 +691,22 @@ app.post('/api/admin/orders/delay', requireAdmin, async (req: AuthenticatedReque
   }
 
   try {
-    const { error } = await supabase
+    const db = getScopedSupabaseClient(req);
+    const { data, error } = await db
       .from('orders')
       .update({
         delay_minutes: Number(delayMinutes) || 0,
         delay_message: delayMessage || '',
       })
-      .or(`id.eq.${orderId},order_number.eq.${orderId}`);
+      .or(`id.eq.${orderId},order_number.eq.${orderId}`)
+      .select();
 
     if (error) {
-      res.status(500).json({ error: 'Failed to update order delay' });
+      console.error('[Admin Orders Delay] Database update error:', error.message);
+      res.status(500).json({ error: `Failed to update order delay in database: ${error.message}` });
       return;
     }
-    res.json({ success: true });
+    res.json({ success: true, order: data?.[0] });
   } catch (err: unknown) {
     res.status(500).json({ error: 'Internal server error updating delay' });
   }

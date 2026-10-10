@@ -17,7 +17,9 @@ interface CustomerAuthContextType {
   selectedOrderNumberForModal: string | null;
   setSelectedOrderNumberForModal: (orderNum: string | null) => void;
   openMyOrdersWithOrder: (orderNum: string) => void;
-  loginWithGoogle: () => Promise<{ success: boolean; error?: string }>;
+  loginWithGoogle: () => Promise<{ success: boolean; error?: string; url?: string }>;
+  loginWithEmail: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  signUpWithEmail: (email: string, password: string, fullName: string) => Promise<{ success: boolean; error?: string }>;
   logoutCustomer: () => Promise<void>;
   updateCustomerProfile: (data: Partial<CustomerProfile>) => Promise<boolean>;
   openLoginModal: () => void;
@@ -41,12 +43,12 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setIsMyOrdersOpen(true);
   }, []);
 
-  // Helper to load or synchronize profile for an authenticated user
+  // Synchronize customer profile from cloud database
   const loadProfile = useCallback(async (currentUserId: string, currentUserEmail?: string, currentName?: string) => {
     try {
       let profile = await fetchCustomerProfileFromCloud(currentUserId);
       if (!profile) {
-        // Construct default profile from Google OAuth metadata
+        // Construct standard default profile for Dharamkot delivery
         profile = {
           userId: currentUserId,
           fullName: currentName || currentUserEmail?.split('@')[0] || 'Customer',
@@ -77,11 +79,9 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
             sessionData.session.user.user_metadata?.full_name ||
             sessionData.session.user.user_metadata?.name;
           await loadProfile(sessionData.session.user.id, sessionData.session.user.email, metaName);
-          setIsLoading(false);
-          return;
         }
       } catch (err) {
-        console.warn('Auth initialization notice:', err);
+        console.warn('Customer auth initialization notice:', err);
       } finally {
         if (mounted) setIsLoading(false);
       }
@@ -89,7 +89,7 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     initAuth();
 
-    // Listen for real-time authentication changes across tabs and OAuth redirects
+    // Standard Supabase auth state change subscription
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       if (!mounted) return;
       if (newSession?.user) {
@@ -105,71 +105,24 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }
     });
 
-    // Cross-tab and popup storage synchronization
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key && e.key.includes('auth-token')) {
-        supabase.auth.getSession().then(({ data }) => {
-          if (data?.session?.user && mounted) {
-            setSession(data.session);
-            setUser(data.session.user);
-            const metaName =
-              data.session.user.user_metadata?.full_name ||
-              data.session.user.user_metadata?.name;
-            loadProfile(data.session.user.id, data.session.user.email, metaName);
-          }
-        });
-      }
-    };
-    window.addEventListener('storage', handleStorage);
-
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'SUPABASE_AUTH_COMPLETE') {
-        supabase.auth.getSession().then(({ data }) => {
-          if (data?.session?.user && mounted) {
-            setSession(data.session);
-            setUser(data.session.user);
-            const metaName =
-              data.session.user.user_metadata?.full_name ||
-              data.session.user.user_metadata?.name;
-            loadProfile(data.session.user.id, data.session.user.email, metaName);
-            setIsAuthModalOpen(false);
-          }
-        });
-      }
-    };
-    window.addEventListener('message', handleMessage);
-
-    // If current window is an OAuth redirect inside a popup, notify opener and auto-close
-    if (
-      typeof window !== 'undefined' &&
-      window.opener &&
-      (window.location.hash.includes('access_token') || window.location.search.includes('code='))
-    ) {
-      try {
-        window.opener.postMessage({ type: 'SUPABASE_AUTH_COMPLETE' }, '*');
-      } catch {}
-      setTimeout(() => {
-        try { window.close(); } catch {}
-      }, 600);
-    }
-
     return () => {
       mounted = false;
       authListener?.subscription?.unsubscribe();
-      window.removeEventListener('storage', handleStorage);
-      window.removeEventListener('message', handleMessage);
     };
   }, [loadProfile]);
 
-  const loginWithGoogle = async (): Promise<{ success: boolean; error?: string }> => {
+  /**
+   * Initiates standard Google OAuth redirection.
+   * Directs user to Supabase OAuth with callback to /auth/callback
+   */
+  const loginWithGoogle = async (): Promise<{ success: boolean; error?: string; url?: string }> => {
     try {
-      const redirectUrl = window.location.origin;
-      const isIframe = window.self !== window.top;
+      const redirectUrl = `${window.location.origin}/auth/callback`;
+
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: redirectUrl,
-          skipBrowserRedirect: isIframe,
           queryParams: {
             access_type: 'offline',
             prompt: 'select_account',
@@ -178,12 +131,14 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
       });
 
       if (error) {
-        console.error('Google OAuth sign-in notice:', error);
+        console.error('Google OAuth sign-in error:', error);
         return { success: false, error: error.message };
       }
 
-      if (isIframe && data?.url) {
-        window.open(data.url, '_blank');
+      if (data?.url) {
+        // Direct browser navigation to Google OAuth provider
+        window.location.href = data.url;
+        return { success: true, url: data.url };
       }
 
       return { success: true };
@@ -193,44 +148,108 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   };
 
+  /**
+   * Standard Email sign-in
+   */
+  const loginWithEmail = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      });
+      if (error) {
+        return { success: false, error: error.message };
+      }
+      if (data?.session?.user) {
+        setSession(data.session);
+        setUser(data.session.user);
+        const metaName =
+          data.session.user.user_metadata?.full_name ||
+          data.session.user.user_metadata?.name;
+        await loadProfile(data.session.user.id, data.session.user.email, metaName);
+        setIsAuthModalOpen(false);
+        return { success: true };
+      }
+      return { success: false, error: 'Sign-in failed. Please try again.' };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to sign in' };
+    }
+  };
+
+  /**
+   * Standard Email sign-up
+   */
+  const signUpWithEmail = async (email: string, password: string, fullName: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim().toLowerCase(),
+        password,
+        options: {
+          data: {
+            full_name: fullName.trim(),
+            name: fullName.trim(),
+          },
+        },
+      });
+      if (error) {
+        return { success: false, error: error.message };
+      }
+      if (data?.session?.user) {
+        setSession(data.session);
+        setUser(data.session.user);
+        await loadProfile(data.session.user.id, data.session.user.email, fullName.trim());
+        setIsAuthModalOpen(false);
+        return { success: true };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to create customer account' };
+    }
+  };
+
+  /**
+   * Customer sign-out
+   */
   const logoutCustomer = async (): Promise<void> => {
     try {
       await supabase.auth.signOut();
-    } catch {}
+    } catch (err) {
+      console.warn('Customer signOut notice:', err);
+    }
     setUser(null);
     setSession(null);
     setCustomerProfile(null);
     setIsMyOrdersOpen(false);
     setIsAccountModalOpen(false);
-
-    // Clear customer-specific orders from local cache on logout
-    try {
-      localStorage.removeItem('pb_customer_orders');
-      localStorage.removeItem('pb_customer_tokens');
-    } catch {}
   };
 
+  /**
+   * Update and persist customer profile
+   */
   const updateCustomerProfile = async (data: Partial<CustomerProfile>): Promise<boolean> => {
     if (!user) return false;
     const updated: CustomerProfile = {
       ...(customerProfile || {
         userId: user.id,
-        fullName: user.user_metadata?.full_name || 'Customer',
+        fullName: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Customer',
         email: user.email || '',
+        city: 'Dharamkot',
+        state: 'Punjab',
+        pincode: '142042',
       }),
       ...data,
       userId: user.id,
-      updatedAt: new Date().toISOString(),
     };
 
-    setCustomerProfile(updated);
-    const ok = await saveCustomerProfileToCloud(updated);
-    return ok;
+    const success = await saveCustomerProfileToCloud(updated);
+    if (success) {
+      setCustomerProfile(updated);
+      return true;
+    }
+    return false;
   };
 
-  const openLoginModal = () => {
-    setIsAuthModalOpen(true);
-  };
+  const openLoginModal = () => setIsAuthModalOpen(true);
 
   return (
     <CustomerAuthContext.Provider
@@ -249,6 +268,8 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
         setSelectedOrderNumberForModal,
         openMyOrdersWithOrder,
         loginWithGoogle,
+        loginWithEmail,
+        signUpWithEmail,
         logoutCustomer,
         updateCustomerProfile,
         openLoginModal,
@@ -259,7 +280,7 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
   );
 };
 
-export const useCustomerAuth = (): CustomerAuthContextType => {
+export const useCustomerAuth = () => {
   const context = useContext(CustomerAuthContext);
   if (!context) {
     throw new Error('useCustomerAuth must be used within a CustomerAuthProvider');

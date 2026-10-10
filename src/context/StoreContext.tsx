@@ -181,8 +181,8 @@ interface StoreContextType {
     orderData: Omit<Order, 'id' | 'orderNumber' | 'createdAt' | 'status' | 'trackingToken'>
   ) => Promise<{ success: boolean; order?: Order; error?: string }>;
   syncCustomerOrders: (userId: string, email?: string) => Promise<Order[]>;
-  updateOrderStatus: (orderId: string, status: OrderStatus) => void;
-  delayOrder: (orderId: string, additionalMinutes: number, reason: string) => void;
+  updateOrderStatus: (orderId: string, status: OrderStatus) => Promise<{ success: boolean; error?: string }>;
+  delayOrder: (orderId: string, additionalMinutes: number, reason: string) => Promise<{ success: boolean; error?: string }>;
   findOrder: (query: string) => Order | undefined;
 
   // Custom Cakes
@@ -1311,7 +1311,21 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return customerOrders;
   };
 
-  const updateOrderStatus = (orderId: string, status: OrderStatus) => {
+  const updateOrderStatus = async (
+    orderId: string,
+    status: OrderStatus
+  ): Promise<{ success: boolean; error?: string }> => {
+    // 1. Send update to authoritative cloud database first
+    const result = await updateOrderStatusInCloud(orderId, status);
+    if (!result.success) {
+      console.error('Failed to update order status in database:', result.error);
+      return {
+        success: false,
+        error: result.error || 'Failed to update order status in bakery database.',
+      };
+    }
+
+    // 2. Only after receiving confirmation of a successful database operation, update state
     let matchedToken: string | undefined;
     let matchedNum: string | undefined;
 
@@ -1341,28 +1355,41 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setCurrentOrder((prev) => (prev ? { ...prev, status } : prev));
     }
 
-    updateOrderStatusInCloud(orderId, status).catch((err) => {
-      console.warn('Supabase updateOrderStatus error:', err);
-    });
-
     if (matchedToken && matchedNum) {
       broadcastOrderStatus(matchedNum, matchedToken, { status });
     }
+
+    return { success: true };
   };
 
-  const delayOrder = (orderId: string, additionalMinutes: number, reason: string) => {
-    let targetStatus: OrderStatus = 'preparing';
-    let totalDelay = additionalMinutes;
-    let matchedToken: string | undefined;
-    let matchedNum: string | undefined;
+  const delayOrder = async (
+    orderId: string,
+    additionalMinutes: number,
+    reason: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const existingOrder = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
+    const targetStatus: OrderStatus = existingOrder?.status || 'preparing';
+    const totalDelay = (existingOrder?.delayMinutes || 0) + additionalMinutes;
     const currentMessage =
       reason || `Order delayed by ${additionalMinutes} mins due to fresh batch preparation.`;
+
+    // 1. Send update to authoritative database first
+    const result = await updateOrderStatusInCloud(orderId, targetStatus, totalDelay, currentMessage);
+    if (!result.success) {
+      console.error('Failed to update order delay in database:', result.error);
+      return {
+        success: false,
+        error: result.error || 'Failed to update order delay in bakery database.',
+      };
+    }
+
+    // 2. Update state only on confirmation
+    let matchedToken: string | undefined;
+    let matchedNum: string | undefined;
 
     setOrders((prev) =>
       prev.map((ord) => {
         if (ord.id === orderId || ord.orderNumber === orderId) {
-          totalDelay = (ord.delayMinutes || 0) + additionalMinutes;
-          targetStatus = ord.status;
           matchedToken = ord.trackingToken;
           matchedNum = ord.orderNumber;
           return {
@@ -1378,8 +1405,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCustomerOrders((prev) =>
       prev.map((ord) => {
         if (ord.id === orderId || ord.orderNumber === orderId) {
-          totalDelay = (ord.delayMinutes || 0) + additionalMinutes;
-          targetStatus = ord.status;
           matchedToken = ord.trackingToken;
           matchedNum = ord.orderNumber;
           return {
@@ -1404,10 +1429,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       );
     }
 
-    updateOrderStatusInCloud(orderId, targetStatus, totalDelay, currentMessage).catch((err) => {
-      console.warn('Supabase delayOrder error:', err);
-    });
-
     if (matchedToken && matchedNum) {
       broadcastOrderStatus(matchedNum, matchedToken, {
         status: targetStatus,
@@ -1415,6 +1436,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         delayMessage: currentMessage,
       });
     }
+
+    return { success: true };
   };
 
   const findOrder = (query: string): Order | undefined => {

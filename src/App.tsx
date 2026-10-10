@@ -8,6 +8,7 @@ import { MyOrdersModal } from './components/MyOrdersModal';
 import { CustomerAccountModal } from './components/CustomerAccountModal';
 import { StorefrontPage } from './pages/StorefrontPage';
 import { AdminPage } from './pages/AdminPage';
+import { AuthCallbackHandler } from './pages/AuthCallbackHandler';
 
 // Handles backwards-compatibility for any legacy hash links (e.g. /#/admin -> /admin)
 function HashRedirector() {
@@ -32,6 +33,7 @@ export default function App() {
             <HashRedirector />
             <Routes>
               <Route path="/" element={<StorefrontPage />} />
+              <Route path="/auth/callback" element={<AuthCallbackHandler />} />
               <Route path="/admin" element={<AdminPage />} />
               <Route path="/orders" element={<Navigate to="/" replace />} />
               <Route path="/orders/:token" element={<Navigate to="/" replace />} />

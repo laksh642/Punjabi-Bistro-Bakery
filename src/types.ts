@@ -126,6 +126,7 @@ export interface Order {
   isNoContactDelivery?: boolean;
   contactlessDelivery?: boolean;
   createdAt: string;
+  orderDateTimeIST?: string;
   estimatedDeliveryTime?: string;
   delayMinutes?: number;
   delayMessage?: string;
@@ -199,6 +200,7 @@ export interface BusinessSettings {
   showAnnouncement: boolean;
   maxOrdersPerSlot: number;
   defaultPrepMinutes: number;
+  updatedAt?: string;
 }
 
 export interface ReviewItem {

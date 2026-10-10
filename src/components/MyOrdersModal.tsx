@@ -22,6 +22,7 @@ import { useCustomerAuth } from '../context/CustomerAuthContext';
 import { useStore } from '../context/StoreContext';
 import { Order, OrderStatus } from '../types';
 import { supabase } from '../lib/supabase';
+import { formatISTDateTimePrecise } from '../lib/dateTime';
 
 const STATUS_BADGES: Record<
   OrderStatus,
@@ -169,19 +170,7 @@ export const MyOrdersModal: React.FC = () => {
   if (!isMyOrdersOpen) return null;
 
   const formatOrderDateTime = (dateStr: string) => {
-    try {
-      const d = new Date(dateStr);
-      return d.toLocaleDateString('en-IN', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true,
-      });
-    } catch {
-      return dateStr;
-    }
+    return formatISTDateTimePrecise(dateStr);
   };
 
   // Strictly filter orders matching the authenticated user's permanent ID

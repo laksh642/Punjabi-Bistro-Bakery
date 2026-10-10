@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, ShieldCheck, MapPin, Clock, AlertCircle, ArrowRight } from 'lucide-react';
+import { X, ShieldCheck, MapPin, Clock, AlertCircle, Mail, KeyRound, User as UserIcon } from 'lucide-react';
 import { useCustomerAuth } from '../context/CustomerAuthContext';
 import { PunjabiBistroLogo } from './PunjabiBistroLogo';
 
@@ -9,6 +9,8 @@ export const CustomerAuthModal: React.FC = () => {
     isAuthModalOpen,
     setIsAuthModalOpen,
     loginWithGoogle,
+    loginWithEmail,
+    signUpWithEmail,
     user,
     customerProfile,
     logoutCustomer,
@@ -18,6 +20,12 @@ export const CustomerAuthModal: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+
+  // Email state
+  const [emailTab, setEmailTab] = useState<'signin' | 'signup'>('signin');
+  const [emailInput, setEmailInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [fullNameInput, setFullNameInput] = useState('');
 
   if (!isAuthModalOpen) return null;
 
@@ -30,9 +38,43 @@ export const CustomerAuthModal: React.FC = () => {
         setAuthError(
           result.error || 'Google Sign-in could not be completed. Please try again.'
         );
+        setIsLoading(false);
       }
+      // On success, browser navigates to Google OAuth flow
     } catch (err: any) {
       setAuthError(err?.message || 'Unexpected error signing in with Google.');
+      setIsLoading(false);
+    }
+  };
+
+  const handleEmailSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emailInput.trim() || !passwordInput.trim()) {
+      setAuthError('Please enter both your email address and password.');
+      return;
+    }
+    setIsLoading(true);
+    setAuthError(null);
+
+    try {
+      if (emailTab === 'signin') {
+        const res = await loginWithEmail(emailInput, passwordInput);
+        if (!res.success) {
+          setAuthError(res.error || 'Failed to sign in. Please verify your email and password.');
+        }
+      } else {
+        if (!fullNameInput.trim()) {
+          setAuthError('Please enter your full name.');
+          setIsLoading(false);
+          return;
+        }
+        const res = await signUpWithEmail(emailInput, passwordInput, fullNameInput);
+        if (!res.success) {
+          setAuthError(res.error || 'Failed to create account.');
+        }
+      }
+    } catch (err: any) {
+      setAuthError(err?.message || 'Authentication error.');
     } finally {
       setIsLoading(false);
     }
@@ -61,18 +103,18 @@ export const CustomerAuthModal: React.FC = () => {
 
             <div className="flex items-center gap-3 mb-3">
               <PunjabiBistroLogo className="w-12 h-12 shadow-md rounded-full bg-white p-1" />
-              <div>
-                <span className="text-[10px] font-bold tracking-wider uppercase text-amber-300 bg-amber-400/20 px-2 py-0.5 rounded-full border border-amber-300/30">
-                  Customer Account
-                </span>
-                <h2 className="text-xl font-serif font-bold text-white leading-tight">
-                  Punjabi Bistro &amp; Bakery
-                </h2>
-              </div>
+            </div>
+            <div>
+              <span className="text-[10px] font-bold tracking-wider uppercase text-amber-300 bg-amber-400/20 px-2 py-0.5 rounded-full border border-amber-300/30">
+                Customer Account
+              </span>
+              <h2 className="text-xl font-serif font-bold text-white leading-tight mt-1">
+                Punjabi Bistro &amp; Bakery
+              </h2>
             </div>
 
-            <p className="text-xs text-emerald-100/90 leading-relaxed">
-              Sign in with Google to place your order, confirm your Dharamkot delivery address, and view your complete order history.
+            <p className="text-xs text-emerald-100/90 leading-relaxed mt-2">
+              Sign in to place your order, confirm your Dharamkot delivery address, and view your complete order history.
             </p>
           </div>
 
@@ -101,7 +143,7 @@ export const CustomerAuthModal: React.FC = () => {
                     </h3>
                     <p className="text-xs text-emerald-800 truncate">{user.email}</p>
                     <span className="text-[10px] text-emerald-700 font-medium inline-flex items-center gap-1 mt-0.5">
-                      <ShieldCheck className="w-3 h-3" /> Signed in with Google
+                      <ShieldCheck className="w-3 h-3" /> Signed in as Customer
                     </span>
                   </div>
                 </div>
@@ -151,7 +193,7 @@ export const CustomerAuthModal: React.FC = () => {
                 <div className="space-y-2.5 text-xs text-stone-600">
                   <div className="flex items-start gap-2.5">
                     <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                    <span>Secure ordering connected to your Google account</span>
+                    <span>Secure ordering connected to your customer account</span>
                   </div>
                   <div className="flex items-start gap-2.5">
                     <MapPin className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
@@ -159,7 +201,7 @@ export const CustomerAuthModal: React.FC = () => {
                   </div>
                   <div className="flex items-start gap-2.5">
                     <Clock className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                    <span>View your baking and delivery progress in real time across any device</span>
+                    <span>View baking and delivery progress in real time</span>
                   </div>
                 </div>
 
@@ -168,7 +210,7 @@ export const CustomerAuthModal: React.FC = () => {
                   id="btn-google-customer-auth"
                   onClick={handleGoogleSignIn}
                   disabled={isLoading}
-                  className="w-full py-3 px-4 bg-white hover:bg-stone-50 border-2 border-stone-200 hover:border-emerald-600 text-stone-800 rounded-xl font-semibold text-sm transition-all shadow-xs flex items-center justify-center gap-3 cursor-pointer disabled:opacity-50"
+                  className="w-full py-3.5 px-4 bg-white hover:bg-stone-50 border-2 border-stone-200 hover:border-emerald-600 text-stone-800 rounded-xl font-semibold text-sm transition-all shadow-xs flex items-center justify-center gap-3 cursor-pointer disabled:opacity-50"
                 >
                   {isLoading ? (
                     <div className="w-5 h-5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
@@ -192,11 +234,88 @@ export const CustomerAuthModal: React.FC = () => {
                       />
                     </svg>
                   )}
-                  <span>Continue with Google</span>
+                  <span>{isLoading ? 'Connecting to Google...' : 'Continue with Google'}</span>
                 </button>
 
+                {/* Email / Password Option Divider */}
+                <div className="relative flex py-1 items-center">
+                  <div className="flex-grow border-t border-stone-200"></div>
+                  <span className="flex-shrink mx-3 text-[11px] text-stone-400 font-medium uppercase tracking-wider">
+                    Or with email
+                  </span>
+                  <div className="flex-grow border-t border-stone-200"></div>
+                </div>
+
+                {/* Optional Email Sign-In / Sign-Up Form */}
+                <div className="space-y-3">
+                  <div className="flex bg-stone-100 p-0.5 rounded-lg text-xs font-medium">
+                    <button
+                      type="button"
+                      onClick={() => setEmailTab('signin')}
+                      className={`flex-1 py-1.5 rounded-md transition-all cursor-pointer ${
+                        emailTab === 'signin' ? 'bg-white text-emerald-900 shadow-xs font-semibold' : 'text-stone-500 hover:text-stone-800'
+                      }`}
+                    >
+                      Sign In
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEmailTab('signup')}
+                      className={`flex-1 py-1.5 rounded-md transition-all cursor-pointer ${
+                        emailTab === 'signup' ? 'bg-white text-emerald-900 shadow-xs font-semibold' : 'text-stone-500 hover:text-stone-800'
+                      }`}
+                    >
+                      Create Account
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleEmailSubmit} className="space-y-2.5">
+                    {emailTab === 'signup' && (
+                      <div className="relative">
+                        <UserIcon className="w-4 h-4 absolute left-3 top-2.5 text-stone-400" />
+                        <input
+                          type="text"
+                          placeholder="Your Full Name"
+                          value={fullNameInput}
+                          onChange={(e) => setFullNameInput(e.target.value)}
+                          className="w-full pl-9 pr-3 py-2 text-xs border border-stone-200 rounded-lg focus:outline-emerald-600"
+                        />
+                      </div>
+                    )}
+                    <div className="relative">
+                      <Mail className="w-4 h-4 absolute left-3 top-2.5 text-stone-400" />
+                      <input
+                        type="email"
+                        placeholder="customer@example.com"
+                        value={emailInput}
+                        onChange={(e) => setEmailInput(e.target.value)}
+                        required
+                        className="w-full pl-9 pr-3 py-2 text-xs border border-stone-200 rounded-lg focus:outline-emerald-600"
+                      />
+                    </div>
+                    <div className="relative">
+                      <KeyRound className="w-4 h-4 absolute left-3 top-2.5 text-stone-400" />
+                      <input
+                        type="password"
+                        placeholder="Password"
+                        value={passwordInput}
+                        onChange={(e) => setPasswordInput(e.target.value)}
+                        required
+                        className="w-full pl-9 pr-3 py-2 text-xs border border-stone-200 rounded-lg focus:outline-emerald-600"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="w-full py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {isLoading ? 'Processing...' : emailTab === 'signin' ? 'Sign In with Email' : 'Create Customer Account'}
+                    </button>
+                  </form>
+                </div>
+
                 <p className="text-[11px] text-center text-stone-500 leading-tight">
-                  By continuing, your order and account will be safely linked to your Google identity.
+                  By continuing, your order and address will be securely linked to your customer profile.
                 </p>
               </div>
             )}

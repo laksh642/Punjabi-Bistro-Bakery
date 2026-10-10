@@ -549,10 +549,10 @@ export const AdminDashboard: React.FC = () => {
     (o) => o.status === 'delivered' || o.status === 'completed'
   );
 
-  const handleApplyDelay = (e: React.FormEvent) => {
+  const handleApplyDelay = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!delayModalOrder) return;
-    delayOrder(delayModalOrder.id, delayMinutes, delayReason);
+    await delayOrder(delayModalOrder.id, delayMinutes, delayReason);
     setDelayModalOrder(null);
   };
 
@@ -2813,7 +2813,7 @@ export const AdminDashboard: React.FC = () => {
 // Reusable Order Card for Kanban
 interface OrderCardProps {
   order: Order;
-  onUpdateStatus: (status: OrderStatus) => void;
+  onUpdateStatus: (status: OrderStatus) => Promise<{ success: boolean; error?: string }>;
   onDelay: () => void;
   onPrint: () => void;
   businessSettings: any;
@@ -2826,6 +2826,25 @@ const OrderCard: React.FC<OrderCardProps> = ({
   onPrint,
   businessSettings,
 }) => {
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+
+  const handleStatusChange = async (newStatus: OrderStatus) => {
+    if (isUpdating || newStatus === order.status) return;
+    setIsUpdating(true);
+    setUpdateError(null);
+    try {
+      const res = await onUpdateStatus(newStatus);
+      if (!res.success) {
+        setUpdateError(res.error || 'Failed to update order status');
+      }
+    } catch (err: any) {
+      setUpdateError(err?.message || 'Error updating order status');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   return (
     <div className="bg-white rounded-2xl border border-emerald-100 p-3.5 shadow-xs space-y-2.5 text-xs">
       <div className="flex items-start justify-between gap-2">
@@ -2844,6 +2863,21 @@ const OrderCard: React.FC<OrderCardProps> = ({
           </span>
         </div>
       </div>
+
+      {/* Update Error Notice */}
+      {updateError && (
+        <div className="p-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-[10px] font-medium flex items-center justify-between gap-1 shadow-2xs">
+          <span className="truncate">⚠️ {updateError}</span>
+          <button
+            type="button"
+            onClick={() => setUpdateError(null)}
+            className="text-rose-600 hover:text-rose-800 font-bold px-1 cursor-pointer shrink-0"
+            title="Dismiss error"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Contactless Delivery Notification */}
       {(order.isNoContactDelivery || (order as any).contactlessDelivery) && (
@@ -2891,15 +2925,19 @@ const OrderCard: React.FC<OrderCardProps> = ({
           </div>
           <div className="flex items-center gap-1.5">
             <button
-              onClick={() => onUpdateStatus('confirmed')}
-              className="flex-1 py-1.5 px-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[10px] font-bold transition-all shadow-2xs cursor-pointer text-center"
+              type="button"
+              disabled={isUpdating}
+              onClick={() => handleStatusChange('confirmed')}
+              className="flex-1 py-1.5 px-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-[10px] font-bold transition-all shadow-2xs cursor-pointer text-center"
               title="Re-confirm order and send to active queue"
             >
               ✓ Re-Confirm
             </button>
             <button
-              onClick={() => onUpdateStatus('preparing')}
-              className="flex-1 py-1.5 px-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold transition-all shadow-2xs cursor-pointer text-center"
+              type="button"
+              disabled={isUpdating}
+              onClick={() => handleStatusChange('preparing')}
+              className="flex-1 py-1.5 px-2 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-[10px] font-bold transition-all shadow-2xs cursor-pointer text-center"
               title="Move order directly into kitchen preparation"
             >
               🍳 In Kitchen
@@ -2910,19 +2948,25 @@ const OrderCard: React.FC<OrderCardProps> = ({
 
       {/* Action Buttons */}
       <div className="pt-2 border-t border-stone-100 flex flex-wrap items-center gap-1.5">
-        <select
-          value={order.status}
-          onChange={(e) => onUpdateStatus(e.target.value as OrderStatus)}
-          className="text-[11px] p-1.5 rounded-lg border border-emerald-200 bg-emerald-50/50 font-semibold text-emerald-950 focus:outline-none focus:border-emerald-600 cursor-pointer flex-1 min-w-[100px]"
-        >
-          <option value="new">New</option>
-          <option value="confirmed">Confirmed</option>
-          <option value="preparing">In Kitchen</option>
-          <option value="ready">Ready</option>
-          <option value="out_for_delivery">Out for Delivery</option>
-          <option value="delivered">Delivered</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
+        <div className="relative flex-1 min-w-[110px]">
+          <select
+            value={order.status}
+            disabled={isUpdating}
+            onChange={(e) => handleStatusChange(e.target.value as OrderStatus)}
+            className="w-full text-[11px] p-1.5 rounded-lg border border-emerald-200 bg-emerald-50/50 font-semibold text-emerald-950 focus:outline-none focus:border-emerald-600 cursor-pointer disabled:opacity-50"
+          >
+            <option value="new">New</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="preparing">In Kitchen</option>
+            <option value="ready">Ready</option>
+            <option value="out_for_delivery">Out for Delivery</option>
+            <option value="delivered">Delivered</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          {isUpdating && (
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 border border-emerald-600 border-t-transparent rounded-full animate-spin pointer-events-none" />
+          )}
+        </div>
 
         <button
           onClick={onDelay}

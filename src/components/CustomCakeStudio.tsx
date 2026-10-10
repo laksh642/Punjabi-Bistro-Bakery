@@ -417,7 +417,7 @@ export const CustomCakeStudio: React.FC = () => {
                     <div className="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-start gap-2">
                       <Clock className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
                       <span>
-                        <strong>Short notice notice:</strong> Custom multi-tier or complex fondant cakes usually require advance preparation. If needed today, please submit and WhatsApp us immediately at <strong>098562 04951</strong> to confirm quick feasibility.
+                        <strong>Short notice notice:</strong> Custom multi-tier or complex fondant cakes usually require advance preparation. If needed today, please submit and WhatsApp us immediately at <strong>{businessSettings.whatsapp || businessSettings.phone}</strong> to confirm quick feasibility.
                       </span>
                     </div>
                   )}

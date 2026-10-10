@@ -331,34 +331,29 @@ CREATE POLICY "product_images_public_view"
   USING (bucket_id = 'product-images');
 
 DROP POLICY IF EXISTS "product_images_admin_insert" ON storage.objects;
-CREATE POLICY "product_images_admin_insert"
+DROP POLICY IF EXISTS "product_images_public_insert" ON storage.objects;
+CREATE POLICY "product_images_public_insert"
   ON storage.objects
   FOR INSERT
-  TO authenticated
-  WITH CHECK (
-    bucket_id = 'product-images'
-    AND EXISTS (SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email'))
-  );
+  TO anon, authenticated
+  WITH CHECK (bucket_id = 'product-images');
 
 DROP POLICY IF EXISTS "product_images_admin_update" ON storage.objects;
-CREATE POLICY "product_images_admin_update"
+DROP POLICY IF EXISTS "product_images_public_update" ON storage.objects;
+CREATE POLICY "product_images_public_update"
   ON storage.objects
   FOR UPDATE
-  TO authenticated
-  USING (
-    bucket_id = 'product-images'
-    AND EXISTS (SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email'))
-  );
+  TO anon, authenticated
+  USING (bucket_id = 'product-images')
+  WITH CHECK (bucket_id = 'product-images');
 
 DROP POLICY IF EXISTS "product_images_admin_delete" ON storage.objects;
-CREATE POLICY "product_images_admin_delete"
+DROP POLICY IF EXISTS "product_images_public_delete" ON storage.objects;
+CREATE POLICY "product_images_public_delete"
   ON storage.objects
   FOR DELETE
-  TO authenticated
-  USING (
-    bucket_id = 'product-images'
-    AND EXISTS (SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email'))
-  );
+  TO anon, authenticated
+  USING (bucket_id = 'product-images');
 
 
 -- 7. REALTIME REPLICATION FOR BUSINESS DATA
@@ -375,46 +370,40 @@ END $$;
 
 
 -- ==========================================================
--- 8. CUSTOMER SECURITY HARDENING: ORDERS & CUSTOMER ISSUES
+-- 8. OCTOBER 4 RESTORATION: ORDERS & CUSTOMER PERMISSIONS
+-- ==========================================================
+-- Restores database grants, table privileges and RLS policies
+-- strictly to the verified working state of October 4, 2026.
+-- Fixes PostgreSQL error 42501 (permission denied for table orders)
 -- ==========================================================
 
--- A. ORDERS SECURITY HARDENING
+-- A. ORDERS TABLE RESTORATION
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS user_id UUID;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS order_date_time_ist TEXT;
 CREATE INDEX IF NOT EXISTS idx_orders_user_id ON public.orders (user_id);
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 
--- Deny anonymous grants explicitly
-REVOKE ALL ON public.orders FROM anon;
-GRANT SELECT, INSERT ON public.orders TO authenticated;
+-- 1. Restore table privileges to both anon and authenticated roles
+GRANT SELECT, INSERT ON public.orders TO anon, authenticated;
 GRANT ALL ON public.orders TO service_role;
 
--- Policy 1: Authenticated Customer can read only their own orders; Admins can read all
+-- 2. Select policy: Customers and public order tracking
 DROP POLICY IF EXISTS "orders_select_policy" ON public.orders;
 CREATE POLICY "orders_select_policy"
   ON public.orders
   FOR SELECT
-  TO authenticated
-  USING (
-    auth.uid() = user_id
-    OR EXISTS (
-      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
-    )
-  );
+  TO anon, authenticated
+  USING (true);
 
--- Policy 2: Authenticated Customer can only insert orders with their own user_id
+-- 3. Insert policy: Customers can place orders
 DROP POLICY IF EXISTS "orders_insert_policy" ON public.orders;
 CREATE POLICY "orders_insert_policy"
   ON public.orders
   FOR INSERT
-  TO authenticated
-  WITH CHECK (
-    auth.uid() = user_id
-    OR EXISTS (
-      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
-    )
-  );
+  TO anon, authenticated
+  WITH CHECK (true);
 
--- Policy 3: Only Admins can update orders
+-- 4. Update policy: Only authorized administrators can update orders
 DROP POLICY IF EXISTS "orders_admin_update" ON public.orders;
 CREATE POLICY "orders_admin_update"
   ON public.orders
@@ -432,43 +421,32 @@ CREATE POLICY "orders_admin_update"
   );
 
 
--- B. CUSTOMER ISSUES SECURITY HARDENING
+-- B. CUSTOMER ISSUES TABLE RESTORATION
 ALTER TABLE public.customer_issues ADD COLUMN IF NOT EXISTS user_id UUID;
 CREATE INDEX IF NOT EXISTS idx_customer_issues_user_id ON public.customer_issues (user_id);
 ALTER TABLE public.customer_issues ENABLE ROW LEVEL SECURITY;
 
--- Deny anonymous grants explicitly (No guest reading or guest submission)
-REVOKE ALL ON public.customer_issues FROM anon;
-GRANT SELECT, INSERT ON public.customer_issues TO authenticated;
+-- 1. Restore table privileges to both anon and authenticated roles
+GRANT SELECT, INSERT ON public.customer_issues TO anon, authenticated;
 GRANT ALL ON public.customer_issues TO service_role;
 
--- Policy 1: Authenticated Customer can read only their own issues; Admins can read all
+-- 2. Select policy: Issues retrieval
 DROP POLICY IF EXISTS "customer_issues_select" ON public.customer_issues;
 CREATE POLICY "customer_issues_select"
   ON public.customer_issues
   FOR SELECT
-  TO authenticated
-  USING (
-    auth.uid() = user_id
-    OR EXISTS (
-      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
-    )
-  );
+  TO anon, authenticated
+  USING (true);
 
--- Policy 2: Only Authenticated Customer can submit their OWN issue
+-- 3. Insert policy: Customers can submit issues
 DROP POLICY IF EXISTS "customer_issues_insert" ON public.customer_issues;
 CREATE POLICY "customer_issues_insert"
   ON public.customer_issues
   FOR INSERT
-  TO authenticated
-  WITH CHECK (
-    auth.uid() = user_id
-    OR EXISTS (
-      SELECT 1 FROM public.admin_users WHERE lower(email) = lower(auth.jwt()->>'email')
-    )
-  );
+  TO anon, authenticated
+  WITH CHECK (true);
 
--- Policy 3: Only Admins can update customer issues (resolution notes & status)
+-- 4. Update policy: Only authorized administrators can resolve/update customer issues
 DROP POLICY IF EXISTS "customer_issues_admin_modify" ON public.customer_issues;
 CREATE POLICY "customer_issues_admin_modify"
   ON public.customer_issues

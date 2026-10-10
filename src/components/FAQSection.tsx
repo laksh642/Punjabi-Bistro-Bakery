@@ -87,7 +87,10 @@ export const FAQSection: React.FC = () => {
 
                 {isOpen && (
                   <div className="px-4 pb-5 sm:px-5 text-xs sm:text-sm text-emerald-950/80 leading-relaxed border-t border-emerald-100 pt-3 animate-in fade-in duration-200">
-                    {faq.answer}
+                    {faq.answer.replace(
+                      'punjabibistro@upi',
+                      businessSettings.upiId || 'our official UPI handle'
+                    )}
                   </div>
                 )}
               </div>

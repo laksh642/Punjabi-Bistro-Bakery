@@ -31,7 +31,7 @@ export const adminSupabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     storageKey: 'pb_admin_auth_session',
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true,
+    detectSessionInUrl: typeof window !== 'undefined' && window.location.pathname.startsWith('/admin'),
   },
 });
 
@@ -43,9 +43,11 @@ export async function getActiveAdminClient() {
     const adminSession = (await adminSupabase.auth.getSession()).data?.session;
     if (adminSession?.user) return adminSupabase;
     const mainSession = (await supabase.auth.getSession()).data?.session;
-    if (mainSession?.user) return supabase;
+    if (mainSession?.user && (await verifyIsAdminUser(mainSession.user.email))) {
+      return supabase;
+    }
   } catch {}
-  return adminSupabase || supabase;
+  return adminSupabase;
 }
 
 /**
@@ -310,7 +312,8 @@ export async function fetchOrdersFromCloud(): Promise<Order[] | null> {
   }
 
   try {
-    const { data, error } = await supabase
+    const targetClient = await getActiveAdminClient();
+    const { data, error } = await targetClient
       .from('orders')
       .select('*')
       .order('created_at', { ascending: false });
@@ -884,8 +887,10 @@ export async function updateOrderStatusInCloud(
   status: OrderStatus,
   delayMinutes?: number,
   delayMessage?: string
-): Promise<boolean> {
+): Promise<{ success: boolean; error?: string }> {
   const adminToken = typeof localStorage !== 'undefined' ? localStorage.getItem('pb_admin_session_token') : null;
+  let serverError: string | undefined;
+
   if (adminToken) {
     try {
       const res = await fetch('/api/admin/orders/status', {
@@ -907,10 +912,13 @@ export async function updateOrderStatusInCloud(
             body: JSON.stringify({ orderId, delayMinutes, delayMessage }),
           });
         }
-        return true;
+        return { success: true };
+      } else {
+        const data = await res.json().catch(() => null);
+        serverError = data?.error || `Server responded with ${res.status}`;
       }
-    } catch {
-      // fallback
+    } catch (err: any) {
+      serverError = err?.message || 'Server connection error';
     }
   }
 
@@ -919,19 +927,26 @@ export async function updateOrderStatusInCloud(
     if (delayMinutes !== undefined) updatePayload.delay_minutes = delayMinutes;
     if (delayMessage !== undefined) updatePayload.delay_message = delayMessage;
 
-    const { error } = await supabase
+    const targetClient = await getActiveAdminClient();
+    const { error } = await targetClient
       .from('orders')
       .update(updatePayload)
       .or(`id.eq.${orderId},order_number.eq.${orderId}`);
 
     if (error) {
       console.warn('Supabase updateOrderStatus error:', error.message);
-      return false;
+      return {
+        success: false,
+        error: error.message || serverError || 'Failed to update order status in database',
+      };
     }
-    return true;
-  } catch (err) {
+    return { success: true };
+  } catch (err: any) {
     console.warn('Supabase updateOrderStatus exception:', err);
-    return false;
+    return {
+      success: false,
+      error: err?.message || serverError || 'Failed to update order status in database',
+    };
   }
 }
 

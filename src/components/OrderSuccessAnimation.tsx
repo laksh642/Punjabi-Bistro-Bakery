@@ -14,6 +14,7 @@ import {
   UtensilsCrossed,
 } from 'lucide-react';
 import { Order, OrderType, BusinessSettings } from '../types';
+import { formatISTDateTimePrecise } from '../lib/dateTime';
 
 interface OrderSuccessAnimationProps {
   isOpen: boolean;
@@ -314,6 +315,9 @@ export const OrderSuccessAnimation: React.FC<OrderSuccessAnimationProps> = ({
                   <div className="font-mono text-lg sm:text-xl font-extrabold text-emerald-950 flex items-center gap-2">
                     <span>#{order.orderNumber}</span>
                   </div>
+                  <span className="text-[10px] text-emerald-800 font-mono font-medium block mt-0.5">
+                    🕒 Placed: {formatISTDateTimePrecise(order.createdAt)}
+                  </span>
                 </div>
                 <button
                   onClick={handleCopyOrderNumber}

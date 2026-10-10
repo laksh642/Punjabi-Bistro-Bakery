@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Plus,
@@ -167,20 +167,33 @@ export const CartDrawer: React.FC = () => {
     }
   }
 
-  // Discount calculation
+  // Strictly enforce minimum order requirement on applied coupon
+  const isCouponValid = Boolean(
+    appliedCoupon &&
+    Number(appliedCoupon.minOrder || 0) > 0 &&
+    cartSubtotal >= Number(appliedCoupon.minOrder)
+  );
+
+  // If subtotal drops below minimum order criteria, immediately remove coupon
+  useEffect(() => {
+    if (appliedCoupon && !isCouponValid) {
+      removeCoupon();
+    }
+  }, [appliedCoupon, isCouponValid, removeCoupon]);
+
   let discountAmount = 0;
-  if (appliedCoupon) {
+  if (isCouponValid && appliedCoupon) {
     if (appliedCoupon.discountType === 'flat') {
-      discountAmount = Math.min(cartSubtotal, appliedCoupon.discountValue);
+      discountAmount = Math.min(cartSubtotal, Number(appliedCoupon.discountValue));
     } else {
-      const rawDiscount = (cartSubtotal * appliedCoupon.discountValue) / 100;
+      const rawDiscount = (cartSubtotal * Number(appliedCoupon.discountValue)) / 100;
       discountAmount = appliedCoupon.maxDiscount
-        ? Math.min(rawDiscount, appliedCoupon.maxDiscount)
+        ? Math.min(rawDiscount, Number(appliedCoupon.maxDiscount))
         : rawDiscount;
     }
   }
 
-  const finalTotal = Math.max(0, cartSubtotal + deliveryFee - discountAmount);
+  const finalTotal = Math.max(0, cartSubtotal + deliveryFee - (isCouponValid ? discountAmount : 0));
 
   const handleApplyCoupon = (e: React.FormEvent) => {
     e.preventDefault();
@@ -264,8 +277,8 @@ export const CartDrawer: React.FC = () => {
       items: cart,
       subtotal: cartSubtotal,
       deliveryFee,
-      discount: discountAmount,
-      couponCode: appliedCoupon?.code,
+      discount: isCouponValid ? discountAmount : 0,
+      couponCode: isCouponValid ? appliedCoupon?.code : undefined,
       total: finalTotal,
       deliveryZoneId: orderType === 'delivery' ? selectedZoneId : undefined,
       deliveryAddress: orderType === 'delivery' ? deliveryAddress.trim() : undefined,
@@ -503,7 +516,7 @@ export const CartDrawer: React.FC = () => {
 
                 {/* Coupon Code Section */}
                 <div className="pt-3 border-t border-emerald-100 space-y-2">
-                  {appliedCoupon ? (
+                  {appliedCoupon && isCouponValid ? (
                     <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 flex items-center justify-between text-xs">
                       <div className="flex items-center gap-1.5 text-emerald-800 font-semibold">
                         <Tag className="w-3.5 h-3.5 text-emerald-600" />
@@ -602,7 +615,7 @@ export const CartDrawer: React.FC = () => {
 
                   <div className="pt-2 border-t border-emerald-200 flex justify-between font-bold text-sm text-emerald-950">
                     <span>Estimated Total</span>
-                    <span className="text-emerald-800 font-extrabold">₹{cartSubtotal - discountAmount}</span>
+                    <span className="text-emerald-800 font-extrabold">₹{Math.max(0, cartSubtotal - (isCouponValid ? discountAmount : 0))}</span>
                   </div>
                 </div>
               </>
