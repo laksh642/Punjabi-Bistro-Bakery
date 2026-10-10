@@ -145,7 +145,6 @@ export const CartDrawer: React.FC = () => {
     }
   }, [customerProfile, user]);
 
-  if (!isCartOpen) return null;
 
   // Selected Zone calculation
   const selectedZone = deliveryZones.find((z) => z.id === selectedZoneId) || deliveryZones[0] || {
@@ -180,6 +179,9 @@ export const CartDrawer: React.FC = () => {
       removeCoupon();
     }
   }, [appliedCoupon, isCouponValid, removeCoupon]);
+
+  // Keep all hooks above this early return so opening/closing the cart never changes hook order.
+  if (!isCartOpen) return null;
 
   let discountAmount = 0;
   if (isCouponValid && appliedCoupon) {
